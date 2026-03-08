@@ -4,6 +4,12 @@ import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
+// Supprime les accents/diacritiques — convention DB sans accents
+function removeAccents(str) {
+  if (!str) return str
+  return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+}
+
 // Groupes musculaires pour les pills de filtre
 const GROUPES = [
   'Tous', 'Pecs', 'Dos', 'Épaules', 'Biceps', 'Triceps',
@@ -88,7 +94,7 @@ export default function ExercicesPage() {
     if (filtre === 'Tous') return exercices
     if (filtre === 'Cardio') return exercices.filter((ex) => ex.categorie === 'cardio')
     return exercices.filter((ex) =>
-      ex.groupe_musculaire?.toLowerCase() === filtre.toLowerCase()
+      removeAccents(ex.groupe_musculaire?.toLowerCase()) === removeAccents(filtre.toLowerCase())
     )
   }, [exercices, filtre])
 
