@@ -42,7 +42,7 @@ Stockage poids TOUJOURS en kg — conversion kg/lbs uniquement à l'affichage
 - [x] Étape 2 : Auth + Profil + Layout bottom nav
 - [x] Étape 3 : Catalogue exercices + badges source
 - [x] Étape 4 : API Route parse-seance (Haiku) + validation
-- [ ] Étape 5 : Saisie NLP complète + sauvegarde DB
+- [x] Étape 5 : Saisie NLP complète + sauvegarde DB
 - [ ] Étape 6 : Historique + progression + PR
 - [ ] Étape 7 : API Route coaching (Sonnet) — 3 modes
 - [ ] Étape 8 : Templates

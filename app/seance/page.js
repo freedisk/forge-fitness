@@ -90,17 +90,18 @@ function ExerciceCard({ exercice }) {
   )
 }
 
-// Page Séance — saisie NLP + écran de validation
+// Page Séance — saisie NLP + écran de validation + sauvegarde DB
 export default function SeancePage() {
   const router = useRouter()
   const [authLoading, setAuthLoading] = useState(true)
+  const [userId, setUserId] = useState(null)
 
-  // États du flow : idle → loading → parsed | error
+  // États du flow : idle → loading → parsed | error | saving | saved
   const [step, setStep] = useState('idle')
   const [texte, setTexte] = useState('')
   const [result, setResult] = useState(null)
   const [errorMsg, setErrorMsg] = useState('')
-  const [confirmed, setConfirmed] = useState(false)
+  const [contexte, setContexte] = useState('maison')
 
   useEffect(() => {
     async function checkAuth() {
@@ -109,6 +110,7 @@ export default function SeancePage() {
         router.push('/login')
         return
       }
+      setUserId(session.user.id)
       setAuthLoading(false)
     }
     checkAuth()
@@ -120,7 +122,6 @@ export default function SeancePage() {
 
     setStep('loading')
     setErrorMsg('')
-    setConfirmed(false)
 
     try {
       const res = await fetch('/api/parse-seance', {
@@ -149,12 +150,138 @@ export default function SeancePage() {
   function handleModify() {
     setStep('idle')
     setResult(null)
-    setConfirmed(false)
   }
 
-  // Confirmation (placeholder — la sauvegarde DB sera l'étape 5)
-  function handleConfirm() {
-    setConfirmed(true)
+  // ── SAUVEGARDE COMPLÈTE EN DB ──
+  async function handleConfirm() {
+    if (!result || !userId) return
+
+    setStep('saving')
+    setErrorMsg('')
+
+    try {
+      // Étape 1 — Créer la séance
+      const now = new Date()
+      const { data: seanceData, error: seanceError } = await supabase
+        .from('seances')
+        .insert({
+          user_id: userId,
+          date: now.toISOString().split('T')[0],
+          heure_debut: now.toTimeString().split(' ')[0],
+          contexte: contexte,
+          texte_brut: texte.trim(),
+        })
+        .select('id')
+        .single()
+
+      if (seanceError) throw new Error(`Séance : ${seanceError.message}`)
+
+      const seanceId = seanceData.id
+      console.log('✅ Séance créée :', seanceId)
+
+      // Étape 2 — Sauvegarder les blocs cardio
+      if (result.cardio?.length > 0) {
+        const cardioRows = result.cardio.map((bloc, i) => ({
+          seance_id: seanceId,
+          type_cardio: bloc.type_cardio,
+          duree_minutes: bloc.duree_minutes,
+          distance_km: bloc.distance_km || null,
+          calories: bloc.calories || null,
+          frequence_cardiaque: bloc.frequence_cardiaque || null,
+          rpe: bloc.rpe || null,
+          ordre: i,
+        }))
+
+        const { error: cardioError } = await supabase
+          .from('cardio_blocs')
+          .insert(cardioRows)
+
+        if (cardioError) throw new Error(`Cardio : ${cardioError.message}`)
+        console.log('✅ Cardio sauvegardé :', cardioRows.length, 'blocs')
+      }
+
+      // Étape 3 — Pour chaque exercice : auto-learning + sauvegarde séries
+      const seriesRows = []
+
+      for (let i = 0; i < (result.exercices?.length || 0); i++) {
+        const ex = result.exercices[i]
+        let exerciceId = null
+
+        // Chercher l'exercice dans le catalogue (ILIKE = insensible à la casse)
+        const { data: found } = await supabase
+          .from('exercices')
+          .select('id')
+          .ilike('nom', ex.nom)
+          .limit(1)
+
+        if (found && found.length > 0) {
+          // Exercice trouvé dans le catalogue
+          exerciceId = found[0].id
+          console.log(`📖 Exercice trouvé : "${ex.nom}" → id=${exerciceId}`)
+        } else {
+          // Auto-learning : créer l'exercice avec source='ia_infere'
+          const { data: created, error: createError } = await supabase
+            .from('exercices')
+            .insert({
+              nom: ex.nom,
+              categorie: ex.categorie,
+              groupe_musculaire: ex.groupe_musculaire,
+              type_equipement: ex.type,
+              is_custom: true,
+              source: 'ia_infere',
+              user_id: userId,
+            })
+            .select('id')
+            .single()
+
+          if (createError) {
+            console.error(`⚠️ Impossible de créer "${ex.nom}" :`, createError.message)
+            continue // Best effort — on continue avec les autres
+          }
+
+          exerciceId = created.id
+          console.log(`🧠 Exercice auto-créé : "${ex.nom}" → id=${exerciceId}`)
+        }
+
+        // Sauvegarder les séries
+        for (const serie of (ex.series || [])) {
+          seriesRows.push({
+            seance_id: seanceId,
+            exercice_id: exerciceId,
+            ordre: i,
+            num_serie: serie.num_serie,
+            repetitions: serie.repetitions,
+            poids_kg: serie.poids_kg || null,
+          })
+        }
+      }
+
+      // Insert groupé de toutes les séries
+      if (seriesRows.length > 0) {
+        const { error: seriesError } = await supabase
+          .from('series')
+          .insert(seriesRows)
+
+        if (seriesError) throw new Error(`Séries : ${seriesError.message}`)
+        console.log('✅ Séries sauvegardées :', seriesRows.length, 'lignes')
+      }
+
+      // Étape 4 — Feedback succès
+      setStep('saved')
+
+      // Retour à l'état idle après 3 secondes
+      setTimeout(() => {
+        setStep('idle')
+        setTexte('')
+        setResult(null)
+        setContexte('maison')
+      }, 3000)
+
+    } catch (err) {
+      console.error('❌ Erreur sauvegarde :', err)
+      setErrorMsg(err.message || 'Erreur lors de la sauvegarde.')
+      setStep('parsed') // Revenir à l'écran de validation pour retry
+    }
   }
 
   if (authLoading) {
@@ -215,8 +342,28 @@ export default function SeancePage() {
       )}
 
       {/* ── ÉCRAN 2 : VALIDATION DU PARSING ── */}
-      {step === 'parsed' && result && (
+      {(step === 'parsed' || step === 'saving') && result && (
         <div>
+          {/* Sélecteur de contexte */}
+          <div className="flex gap-2 mb-4">
+            {[
+              { value: 'maison', label: '🏠 Maison' },
+              { value: 'salle', label: '🏋️ Salle' },
+            ].map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => setContexte(opt.value)}
+                className="flex-1 py-2 text-sm font-medium rounded-[10px] transition-colors"
+                style={{
+                  background: contexte === opt.value ? '#f97316' : 'rgba(255,255,255,0.07)',
+                  color: contexte === opt.value ? '#fff' : '#777',
+                }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
           {/* Titre */}
           <p className="text-base font-semibold mb-4">
             <span style={{ color: '#c084fc' }}>🧠 L'IA a compris :</span>
@@ -247,32 +394,46 @@ export default function SeancePage() {
             </p>
           )}
 
-          {/* Message de confirmation */}
-          {confirmed && (
-            <p className="text-sm text-center mb-3" style={{ color: '#22c55e' }}>
-              ✅ Séance validée !
-            </p>
+          {/* Message d'erreur de sauvegarde */}
+          {errorMsg && (
+            <p className="text-sm text-center mb-3" style={{ color: '#ef4444' }}>{errorMsg}</p>
           )}
 
           {/* Boutons Confirmer / Modifier */}
-          {!confirmed && (
-            <div className="flex gap-3">
-              <button
-                onClick={handleConfirm}
-                className="flex-1 py-3 text-sm font-semibold rounded-[10px] transition-colors"
-                style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e' }}
-              >
-                ✅ Confirmer
-              </button>
-              <button
-                onClick={handleModify}
-                className="flex-1 py-3 text-sm font-semibold rounded-[10px] transition-colors"
-                style={{ background: 'rgba(255,255,255,0.04)', color: '#777' }}
-              >
-                ✏️ Modifier
-              </button>
-            </div>
-          )}
+          <div className="flex gap-3">
+            <button
+              onClick={handleConfirm}
+              disabled={step === 'saving'}
+              className="flex-1 py-3 text-sm font-semibold rounded-[10px] transition-colors disabled:opacity-50"
+              style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e' }}
+            >
+              {step === 'saving' ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="inline-block w-4 h-4 border-2 border-green-500/30 border-t-green-500 rounded-full animate-spin" />
+                  Enregistrement...
+                </span>
+              ) : (
+                '✅ Confirmer'
+              )}
+            </button>
+            <button
+              onClick={handleModify}
+              disabled={step === 'saving'}
+              className="flex-1 py-3 text-sm font-semibold rounded-[10px] transition-colors disabled:opacity-50"
+              style={{ background: 'rgba(255,255,255,0.04)', color: '#777' }}
+            >
+              ✏️ Modifier
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── ÉCRAN 3 : CONFIRMATION SUCCÈS ── */}
+      {step === 'saved' && (
+        <div className="flex flex-col items-center justify-center mt-16 gap-3">
+          <p className="text-4xl">✅</p>
+          <p className="text-lg font-semibold" style={{ color: '#22c55e' }}>Séance enregistrée !</p>
+          <p className="text-xs" style={{ color: '#777' }}>Retour automatique dans 3 secondes...</p>
         </div>
       )}
     </div>
