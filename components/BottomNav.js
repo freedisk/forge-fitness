@@ -3,11 +3,12 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
-// Barre de navigation fixée en bas — 4 onglets + profil
+// Barre de navigation fixée en bas — 5 onglets + profil
 const tabs = [
   { href: '/', label: 'Home', icon: '🏠' },
   { href: '/seance', label: 'Séance', icon: '⚡' },
   { href: '/historique', label: 'Historique', icon: '📋' },
+  { href: '/exercices', label: 'Exercices', icon: '📖' },
   { href: '/stats', label: 'Stats', icon: '📊' },
   { href: '/profil', label: 'Profil', icon: '👤' },
 ]
