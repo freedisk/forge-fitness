@@ -1,8 +1,11 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+
+// Clé localStorage pour persister la séance active
+const LS_KEY = 'forge_active_seance'
 
 // Couleurs des badges par catégorie
 const CATEGORIE_COLORS = {
@@ -265,6 +268,34 @@ export default function SeancePage() {
   const [contexte, setContexte] = useState('maison')
   const [errorMsg, setErrorMsg] = useState('')
 
+  // ── Détecte si des données non sauvegardées sont en cours ──
+  const isDirty = texteInput.trim().length > 0 || status === 'parsed'
+
+  // ── Protection navigation : beforeunload (fermeture onglet / refresh) ──
+  useEffect(() => {
+    if (!isDirty) return
+
+    function handleBeforeUnload(e) {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [isDirty])
+
+  // ── Protection navigation interne : override router.push ──
+  // On wrappe router.push pour intercepter les navigations internes
+  const safePush = useCallback((url) => {
+    if (isDirty) {
+      const confirmed = window.confirm(
+        'Tu as des données non sauvegardées. Quitter cette page ?'
+      )
+      if (!confirmed) return
+    }
+    router.push(url)
+  }, [isDirty, router])
+
   useEffect(() => {
     async function checkAuth() {
       const { data: { session } } = await supabase.auth.getSession()
@@ -273,6 +304,76 @@ export default function SeancePage() {
         return
       }
       setUserId(session.user.id)
+
+      // ── Restaurer une séance active depuis localStorage ──
+      try {
+        const stored = localStorage.getItem(LS_KEY)
+        if (stored) {
+          const { seanceId, heure, ctx } = JSON.parse(stored)
+          if (seanceId) {
+            // Vérifier que la séance existe toujours en DB et appartient au user
+            const { data: seanceData, error: fetchErr } = await supabase
+              .from('seances')
+              .select(`
+                id, contexte, heure_debut,
+                cardio_blocs(type_cardio, duree_minutes),
+                series(exercice_id, num_serie, repetitions, poids_kg, exercices(nom))
+              `)
+              .eq('id', seanceId)
+              .eq('user_id', session.user.id)
+              .single()
+
+            if (!fetchErr && seanceData) {
+              // Reconstruire le récap à partir des données DB
+              const restoredItems = []
+
+              // Cardio
+              for (const bloc of (seanceData.cardio_blocs || [])) {
+                restoredItems.push({
+                  type: 'cardio',
+                  nom: bloc.type_cardio,
+                  duree: bloc.duree_minutes,
+                })
+              }
+
+              // Exercices — regrouper les séries par exercice
+              const exGroups = {}
+              for (const s of (seanceData.series || [])) {
+                const eid = s.exercice_id
+                if (!exGroups[eid]) {
+                  exGroups[eid] = {
+                    type: 'exercice',
+                    nom: s.exercices?.nom || 'Exercice',
+                    series: [],
+                  }
+                }
+                exGroups[eid].series.push({
+                  num_serie: s.num_serie,
+                  repetitions: s.repetitions,
+                  poids_kg: s.poids_kg,
+                })
+              }
+              Object.values(exGroups).forEach((g) => restoredItems.push(g))
+
+              // Restaurer l'état
+              setActiveSeanceId(seanceId)
+              setActiveSeanceData(restoredItems)
+              setHeureDebut(heure || seanceData.heure_debut)
+              setContexte(ctx || seanceData.contexte || 'maison')
+
+              console.log('🔄 Séance restaurée depuis localStorage :', seanceId)
+            } else {
+              // La séance n'existe plus → nettoyer localStorage
+              localStorage.removeItem(LS_KEY)
+              console.log('🧹 Séance expirée, localStorage nettoyé')
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('⚠️ Erreur restauration localStorage :', e)
+        localStorage.removeItem(LS_KEY)
+      }
+
       setAuthLoading(false)
     }
     checkAuth()
@@ -354,6 +455,13 @@ export default function SeancePage() {
       setParseResult(null)
       setStatus('idle') // Prêt pour la passe suivante
 
+      // Persister dans localStorage pour survivre à la navigation
+      localStorage.setItem(LS_KEY, JSON.stringify({
+        seanceId,
+        heure,
+        ctx: contexte,
+      }))
+
     } catch (err) {
       console.error('❌ Erreur sauvegarde :', err)
       setErrorMsg(err.message || 'Erreur lors de la sauvegarde.')
@@ -394,6 +502,13 @@ export default function SeancePage() {
       setParseResult(null)
       setStatus('idle')
 
+      // Mettre à jour localStorage (la séance est déjà persistée, mais on rafraîchit)
+      localStorage.setItem(LS_KEY, JSON.stringify({
+        seanceId: activeSeanceId,
+        heure: heureDebut,
+        ctx: contexte,
+      }))
+
     } catch (err) {
       console.error('❌ Erreur ajout :', err)
       setErrorMsg(err.message || 'Erreur lors de l\'ajout.')
@@ -419,6 +534,9 @@ export default function SeancePage() {
         .eq('id', activeSeanceId)
 
       console.log('✅ Séance terminée — durée :', dureeMinutes, 'min')
+
+      // Nettoyer localStorage
+      localStorage.removeItem(LS_KEY)
 
       // Reset complet
       setActiveSeanceId(null)
