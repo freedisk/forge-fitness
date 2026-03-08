@@ -44,7 +44,7 @@ Stockage poids TOUJOURS en kg — conversion kg/lbs uniquement à l'affichage
 - [x] Étape 4 : API Route parse-seance (Haiku) + validation
 - [x] Étape 5 : Saisie NLP multi-passes + sauvegarde DB + auto-learning catalogue + normalisation accents/underscores
 - [x] Étape 6 : Historique + détail séance + records personnels (PR) + conversion unités + persistance séance active (localStorage)
-- [ ] Étape 7 : API Route coaching (Sonnet) — 3 modes
+- [x] Étape 7 : API Route coaching Sonnet 3 modes (before/during/after) + UI coaching violet + archivage prompts
 - [ ] Étape 8 : Templates
 - [ ] Étape 9 : Dashboard heatmap + KPIs
 - [ ] Étape 10 : Polish + gestion erreurs IA + prod
