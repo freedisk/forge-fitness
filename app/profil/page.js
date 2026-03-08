@@ -48,7 +48,7 @@ export default function ProfilPage() {
         setTaille(data.taille_cm || '')
         setObjectif(data.objectif || '')
         setNiveau(data.niveau || '')
-        setContextes(data.contextes || [])
+        setContextes(data.contextes_dispo || [])
         setUnite(data.unite_poids || 'kg')
         // Afficher le poids converti si unité lbs
         if (data.poids_kg) {
@@ -88,7 +88,7 @@ export default function ProfilPage() {
         taille_cm: taille ? parseInt(taille) : null,
         objectif: objectif || null,
         niveau: niveau || null,
-        contextes,
+        contextes_dispo: contextes,
         unite_poids: unite,
       }, { onConflict: 'user_id' })
 
@@ -292,6 +292,18 @@ export default function ProfilPage() {
           {saving ? 'Enregistrement...' : 'Enregistrer'}
         </button>
       </form>
+
+      {/* Bouton déconnexion */}
+      <button
+        onClick={async () => {
+          await supabase.auth.signOut()
+          router.push('/login')
+        }}
+        className="w-full max-w-sm mt-8 rounded-lg py-3 text-sm font-semibold transition-colors"
+        style={{ background: 'transparent', color: '#ef4444', border: '1px solid rgba(255,255,255,0.08)' }}
+      >
+        Déconnexion
+      </button>
     </div>
   )
 }
