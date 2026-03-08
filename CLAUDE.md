@@ -43,7 +43,7 @@ Stockage poids TOUJOURS en kg — conversion kg/lbs uniquement à l'affichage
 - [x] Étape 3 : Catalogue exercices + badges source
 - [x] Étape 4 : API Route parse-seance (Haiku) + validation
 - [x] Étape 5 : Saisie NLP multi-passes + sauvegarde DB + auto-learning catalogue + normalisation accents/underscores
-- [ ] Étape 6 : Historique + progression + PR
+- [x] Étape 6 : Historique + détail séance + records personnels (PR) + conversion unités
 - [ ] Étape 7 : API Route coaching (Sonnet) — 3 modes
 - [ ] Étape 8 : Templates
 - [ ] Étape 9 : Dashboard heatmap + KPIs
