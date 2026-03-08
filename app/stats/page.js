@@ -4,10 +4,9 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
-// Page d'accueil — vérifie l'auth, redirige si pas connecté
-export default function HomePage() {
+// Page Stats — placeholder avec check auth
+export default function StatsPage() {
   const router = useRouter()
-  const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -17,7 +16,6 @@ export default function HomePage() {
         router.push('/login')
         return
       }
-      setUser(session.user)
       setLoading(false)
     }
     checkAuth()
@@ -33,13 +31,8 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen px-4 pt-12">
-      <h1 className="text-2xl font-bold mb-2">
-        <span style={{ background: 'linear-gradient(135deg, #f97316, #dc2626)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-          ⚡ FORGE
-        </span>
-      </h1>
-      <p className="text-sm" style={{ color: '#777' }}>Bienvenue sur FORGE</p>
-      <p className="text-xs mt-1" style={{ color: '#555' }}>{user?.email}</p>
+      <h1 className="text-2xl font-bold" style={{ color: '#f0f0f0' }}>📊 Stats</h1>
+      <p className="text-sm mt-2" style={{ color: '#777' }}>Bientôt disponible</p>
     </div>
   )
 }
