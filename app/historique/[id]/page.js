@@ -91,6 +91,18 @@ export default function SeanceDetailPage() {
   const [showTexteBrut, setShowTexteBrut] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
+  // Coaching IA — blocs repliables
+  const [showCoachBefore, setShowCoachBefore] = useState(false)
+  const [showCoachDuring, setShowCoachDuring] = useState(false)
+  const [showCoachAfter, setShowCoachAfter] = useState(false)
+
+  // Sauver comme template
+  const [showTemplateModal, setShowTemplateModal] = useState(false)
+  const [templateNom, setTemplateNom] = useState('')
+  const [templateContexte, setTemplateContexte] = useState('salle')
+  const [savingTemplate, setSavingTemplate] = useState(false)
+  const [templateSuccess, setTemplateSuccess] = useState(false)
+
   useEffect(() => {
     async function load() {
       const { data: { session } } = await supabase.auth.getSession()
@@ -192,6 +204,60 @@ export default function SeanceDetailPage() {
 
     console.log('✅ Séance supprimée :', seanceId)
     router.push('/historique')
+  }
+
+  // ── Ouvrir la modale sauver comme template ──
+  function handleOpenTemplateModal() {
+    const dateStr = seance?.date
+      ? new Date(seance.date + 'T00:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })
+      : ''
+    setTemplateNom(`Séance du ${dateStr}`)
+    setTemplateContexte(seance?.contexte || 'salle')
+    setShowTemplateModal(true)
+    setTemplateSuccess(false)
+  }
+
+  // ── Sauvegarder comme template ──
+  async function handleSaveAsTemplate() {
+    if (!templateNom.trim() || !seance) return
+    setSavingTemplate(true)
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) return
+
+      // Créer le template
+      const { data: newTpl, error: tplErr } = await supabase
+        .from('templates')
+        .insert({
+          nom: templateNom.trim(),
+          contexte: templateContexte,
+          source: 'manuel',
+          user_id: session.user.id,
+        })
+        .select()
+        .single()
+
+      if (tplErr) throw new Error(tplErr.message)
+
+      // Extraire les exercices uniques dans l'ordre d'apparition
+      const exerciceIds = [...new Set((seance.series || []).map((s) => s.exercice_id))]
+
+      if (exerciceIds.length > 0) {
+        const rows = exerciceIds.map((eid, i) => ({
+          template_id: newTpl.id,
+          exercice_id: eid,
+          ordre: i,
+        }))
+        await supabase.from('template_exercices').insert(rows)
+      }
+
+      console.log('✅ Template créé :', newTpl.id)
+      setTemplateSuccess(true)
+    } catch (err) {
+      console.error('❌ Erreur création template :', err)
+    }
+    setSavingTemplate(false)
   }
 
   // ── États : chargement, erreur ──
@@ -385,6 +451,115 @@ export default function SeanceDetailPage() {
         </div>
       )}
 
+      {/* ── SECTION COACHING IA ── */}
+      {(seance.coaching_before || seance.coaching_during || seance.coaching_after) && (
+        <div className="mb-6">
+          <p
+            className="text-xs font-medium uppercase tracking-wider mb-3 pb-1"
+            style={{ color: '#a855f7', borderBottom: '1px solid rgba(168,85,247,0.2)' }}
+          >
+            🧠 Coaching IA
+          </p>
+          <div className="flex flex-col gap-2">
+
+            {/* Coaching Before */}
+            {seance.coaching_before && (
+              <div
+                className="rounded-[10px] overflow-hidden"
+                style={{ background: 'rgba(168,85,247,0.06)', border: '1px solid rgba(168,85,247,0.15)' }}
+              >
+                <button
+                  onClick={() => setShowCoachBefore(!showCoachBefore)}
+                  className="w-full text-left px-3.5 py-2.5 text-xs font-medium flex items-center justify-between"
+                  style={{ color: '#c084fc' }}
+                >
+                  <span>🌅 Avant séance</span>
+                  <span>{showCoachBefore ? '▾' : '▸'}</span>
+                </button>
+                {showCoachBefore && (
+                  <div
+                    className="px-3.5 pb-3 text-xs whitespace-pre-wrap leading-relaxed"
+                    style={{ color: '#c084fc' }}
+                  >
+                    {seance.coaching_before}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Coaching During */}
+            {seance.coaching_during && (
+              <div
+                className="rounded-[10px] overflow-hidden"
+                style={{ background: 'rgba(168,85,247,0.06)', border: '1px solid rgba(168,85,247,0.15)' }}
+              >
+                <button
+                  onClick={() => setShowCoachDuring(!showCoachDuring)}
+                  className="w-full text-left px-3.5 py-2.5 text-xs font-medium flex items-center justify-between"
+                  style={{ color: '#c084fc' }}
+                >
+                  <span>⚡ Pendant séance</span>
+                  <span>{showCoachDuring ? '▾' : '▸'}</span>
+                </button>
+                {showCoachDuring && (
+                  <div className="px-3.5 pb-3 text-xs leading-relaxed" style={{ color: '#c084fc' }}>
+                    {seance.coaching_during.split('\n\n---\n\n').map((block, i, arr) => (
+                      <div key={i}>
+                        <p className="whitespace-pre-wrap">{block}</p>
+                        {i < arr.length - 1 && (
+                          <hr className="my-3" style={{ borderColor: 'rgba(168,85,247,0.2)' }} />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Coaching After */}
+            {seance.coaching_after && (
+              <div
+                className="rounded-[10px] overflow-hidden"
+                style={{ background: 'rgba(168,85,247,0.06)', border: '1px solid rgba(168,85,247,0.15)' }}
+              >
+                <button
+                  onClick={() => setShowCoachAfter(!showCoachAfter)}
+                  className="w-full text-left px-3.5 py-2.5 text-xs font-medium flex items-center justify-between"
+                  style={{ color: '#c084fc' }}
+                >
+                  <span>📊 Après séance</span>
+                  <span>{showCoachAfter ? '▾' : '▸'}</span>
+                </button>
+                {showCoachAfter && (
+                  <div
+                    className="px-3.5 pb-3 text-xs whitespace-pre-wrap leading-relaxed"
+                    style={{ color: '#c084fc' }}
+                  >
+                    {seance.coaching_after}
+                  </div>
+                )}
+              </div>
+            )}
+
+          </div>
+        </div>
+      )}
+
+      {/* ── BOUTON SAUVER COMME TEMPLATE ── */}
+      {groups.length > 0 && (
+        <button
+          onClick={handleOpenTemplateModal}
+          className="w-full py-3 mb-3 text-sm font-semibold rounded-xl transition-colors"
+          style={{
+            background: 'transparent',
+            color: '#999',
+            border: '1px solid rgba(255,255,255,0.1)',
+          }}
+        >
+          📋 Sauver comme template
+        </button>
+      )}
+
       {/* ── BOUTON SUPPRIMER ── */}
       <button
         onClick={handleDelete}
@@ -398,6 +573,115 @@ export default function SeanceDetailPage() {
       >
         {deleting ? 'Suppression...' : '🗑️ Supprimer cette séance'}
       </button>
+
+      {/* ── MODALE SAUVER COMME TEMPLATE ── */}
+      {showTemplateModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center"
+          style={{ background: 'rgba(0,0,0,0.6)' }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowTemplateModal(false) }}
+        >
+          <div
+            className="w-full max-w-lg rounded-t-2xl px-4 pt-5 pb-6"
+            style={{ background: '#1a1a1a', border: '1px solid rgba(255,255,255,0.08)' }}
+          >
+            {templateSuccess ? (
+              // ── Écran succès ──
+              <div className="text-center py-4">
+                <p className="text-lg mb-2">✅</p>
+                <p className="text-sm font-semibold mb-3" style={{ color: '#f0f0f0' }}>
+                  Template créé !
+                </p>
+                <a
+                  href="/templates"
+                  className="text-xs underline"
+                  style={{ color: '#f97316' }}
+                >
+                  Voir mes templates →
+                </a>
+                <button
+                  onClick={() => setShowTemplateModal(false)}
+                  className="w-full mt-4 py-2.5 text-sm rounded-lg"
+                  style={{ background: 'rgba(255,255,255,0.06)', color: '#777' }}
+                >
+                  Fermer
+                </button>
+              </div>
+            ) : (
+              // ── Formulaire ──
+              <>
+                <h2 className="text-lg font-bold mb-4" style={{ color: '#f0f0f0' }}>
+                  📋 Sauver comme template
+                </h2>
+
+                <label className="text-xs font-medium mb-1 block" style={{ color: '#777' }}>Nom</label>
+                <input
+                  type="text"
+                  value={templateNom}
+                  onChange={(e) => setTemplateNom(e.target.value)}
+                  className="w-full text-sm px-3 py-2.5 rounded-lg mb-3 outline-none"
+                  style={{ background: 'rgba(255,255,255,0.06)', color: '#f0f0f0', border: '1px solid rgba(255,255,255,0.1)' }}
+                />
+
+                <label className="text-xs font-medium mb-1 block" style={{ color: '#777' }}>Contexte</label>
+                <div className="flex gap-2 mb-4">
+                  {[
+                    { value: 'maison', label: '🏠 Maison' },
+                    { value: 'salle', label: '🏋️ Salle' },
+                    { value: 'mixte', label: '🔀 Mixte' },
+                  ].map((opt) => (
+                    <button
+                      key={opt.value}
+                      onClick={() => setTemplateContexte(opt.value)}
+                      className="flex-1 py-2 text-xs font-medium rounded-lg transition-colors"
+                      style={{
+                        background: templateContexte === opt.value ? '#f97316' : 'rgba(255,255,255,0.07)',
+                        color: templateContexte === opt.value ? '#fff' : '#777',
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Aperçu exercices */}
+                <p className="text-xs mb-2" style={{ color: '#555' }}>
+                  Exercices inclus ({[...new Set((seance.series || []).map((s) => s.exercice_id))].length}) :
+                </p>
+                <div className="flex flex-wrap gap-1.5 mb-4">
+                  {groups.map((g, i) => (
+                    <span
+                      key={i}
+                      className="text-[10px] px-2 py-1 rounded-full"
+                      style={{ background: 'rgba(255,255,255,0.06)', color: '#999' }}
+                    >
+                      {g.nom}
+                    </span>
+                  ))}
+                </div>
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleSaveAsTemplate}
+                    disabled={savingTemplate || !templateNom.trim()}
+                    className="flex-1 py-3 text-sm font-semibold rounded-lg disabled:opacity-50"
+                    style={{ background: 'linear-gradient(135deg, #f97316, #dc2626)', color: '#fff' }}
+                  >
+                    {savingTemplate ? 'Création...' : '✅ Créer le template'}
+                  </button>
+                  <button
+                    onClick={() => setShowTemplateModal(false)}
+                    className="flex-1 py-3 text-sm font-semibold rounded-lg"
+                    style={{ background: 'rgba(255,255,255,0.06)', color: '#777' }}
+                  >
+                    Annuler
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

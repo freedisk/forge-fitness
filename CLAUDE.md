@@ -21,6 +21,7 @@ Deux piliers IA : saisie NLP (Haiku) + coaching 3 temps (Sonnet).
 ## Base de données (Supabase)
 6 tables : profils, exercices, seances, cardio_blocs, series, templates
 + table liaison template_exercices
+seances : ... + coaching_before TEXT, coaching_during TEXT, coaching_after TEXT
 Catalogue exercices : ~55 exos seedés (source='catalogue', user_id NULL)
 Auto-learning : exercices inférés par IA (source='ia_infere', user_id=UUID)
 Stockage poids TOUJOURS en kg — conversion kg/lbs uniquement à l'affichage
@@ -45,6 +46,14 @@ Stockage poids TOUJOURS en kg — conversion kg/lbs uniquement à l'affichage
 - [x] Étape 5 : Saisie NLP multi-passes + sauvegarde DB + auto-learning catalogue + normalisation accents/underscores
 - [x] Étape 6 : Historique + détail séance + records personnels (PR) + conversion unités + persistance séance active (localStorage)
 - [x] Étape 7 : API Route coaching Sonnet 3 modes (before/during/after) + UI coaching violet + archivage prompts
-- [ ] Étape 8 : Templates
+- [x] Étape 8 : Templates de séance — CRUD /templates, checklist guidée /seance, sauver depuis /historique
+- [x] Mini-étape : Persistance coaching IA — sauvegarde before/during/after dans seances + affichage historique (blocs violets repliables)
 - [ ] Étape 9 : Dashboard heatmap + KPIs
 - [ ] Étape 10 : Polish + gestion erreurs IA + prod
+
+## Fonctionnalités coaching IA
+- Coaching IA persisté en DB (coaching_before, coaching_during, coaching_after dans seances)
+- Coaching during concaténé sur appels multiples (séparateur ---)
+- Affichage coaching dans détail historique /historique/[id] — blocs violets repliables
+- Sauvegarde fire-and-forget (non bloquante pour le flow principal)
+- Coaching before différé : stocké en mémoire puis persisté à la création de la séance

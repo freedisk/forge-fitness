@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { toKg, toDisplay, unitLabel } from '@/utils/units'
 
 // Clé localStorage pour persister la séance active
 const LS_KEY = 'forge_active_seance'
@@ -13,6 +14,13 @@ const CATEGORIE_COLORS = {
   poids_corps: { bg: 'rgba(34,197,94,0.15)', text: '#4ade80', border: 'rgba(34,197,94,0.25)' },
   mobilite: { bg: 'rgba(168,85,247,0.15)', text: '#c084fc', border: 'rgba(168,85,247,0.25)' },
   autres: { bg: 'rgba(255,255,255,0.08)', text: '#999', border: 'rgba(255,255,255,0.12)' },
+}
+
+// Couleurs badge contexte (templates)
+const CONTEXTE_COLORS = {
+  maison: { bg: 'rgba(59,130,246,0.15)', text: '#93c5fd', border: 'rgba(59,130,246,0.25)' },
+  salle: { bg: 'rgba(249,115,22,0.15)', text: '#fb923c', border: 'rgba(249,115,22,0.25)' },
+  mixte: { bg: 'rgba(168,85,247,0.15)', text: '#c084fc', border: 'rgba(168,85,247,0.25)' },
 }
 
 // Badge générique réutilisable
@@ -93,23 +101,6 @@ function ExerciceCard({ exercice }) {
   )
 }
 
-// Ligne compacte pour le récap d'un exercice déjà enregistré
-function RecapExerciceLine({ item }) {
-  const seriesCount = item.series?.length || 0
-  const repsSummary = item.series?.map((s) => s.repetitions).join('-') || ''
-  const poids = item.series?.[0]?.poids_kg
-
-  return (
-    <div className="flex items-center justify-between py-1.5">
-      <p className="text-sm truncate" style={{ color: '#f0f0f0' }}>{item.nom}</p>
-      <p className="text-xs whitespace-nowrap ml-2" style={{ color: '#777' }}>
-        {seriesCount}×{repsSummary}
-        {poids != null && <span> · {poids}kg</span>}
-      </p>
-    </div>
-  )
-}
-
 // Supprime les accents/diacritiques — convention DB sans accents
 function removeAccents(str) {
   if (!str) return str
@@ -117,7 +108,6 @@ function removeAccents(str) {
 }
 
 // Normalise une valeur pour format DB technique : minuscules, sans accents, underscores
-// "Full Body" → "full_body", "Épaules" → "epaules", "Poids corps" → "poids_corps"
 function normalizeDbValue(str) {
   if (!str) return str
   return removeAccents(str)
@@ -127,7 +117,6 @@ function normalizeDbValue(str) {
 }
 
 // ── NORMALISATION NOM EXERCICE — anti-doublon ──
-// Normalise pour comparaison : minuscules, tirets→espaces, trim
 function normalizeExerciceName(nom) {
   return nom
     .toLowerCase()
@@ -146,13 +135,11 @@ function canonicalizeExerciceName(nom) {
 async function resolveExerciceId(ex, userId) {
   const normalizedInput = normalizeExerciceName(ex.nom)
 
-  // Charger tous les exercices accessibles : catalogue global + exercices du user
   const { data: allExercices } = await supabase
     .from('exercices')
     .select('id, nom')
     .or(`user_id.is.null,user_id.eq.${userId}`)
 
-  // Comparer les noms normalisés des deux côtés
   if (allExercices && allExercices.length > 0) {
     const match = allExercices.find(
       (e) => normalizeExerciceName(e.nom) === normalizedInput
@@ -163,7 +150,6 @@ async function resolveExerciceId(ex, userId) {
     }
   }
 
-  // Auto-learning : créer avec le nom canonique (majuscule initiale, espaces)
   const canonicalName = canonicalizeExerciceName(ex.nom)
   const { data: created, error } = await supabase
     .from('exercices')
@@ -192,7 +178,6 @@ async function resolveExerciceId(ex, userId) {
 async function saveParseResult(result, seanceId, userId) {
   const savedItems = []
 
-  // Sauvegarder les blocs cardio
   if (result.cardio?.length > 0) {
     const cardioRows = result.cardio.map((bloc, i) => ({
       seance_id: seanceId,
@@ -209,19 +194,17 @@ async function saveParseResult(result, seanceId, userId) {
     if (error) throw new Error(`Cardio : ${error.message}`)
     console.log('✅ Cardio sauvegardé :', cardioRows.length, 'blocs')
 
-    // Ajouter au récap
     result.cardio.forEach((bloc) => {
       savedItems.push({ type: 'cardio', nom: bloc.type_cardio, duree: bloc.duree_minutes })
     })
   }
 
-  // Pour chaque exercice : auto-learning + sauvegarde séries
   const seriesRows = []
 
   for (let i = 0; i < (result.exercices?.length || 0); i++) {
     const ex = result.exercices[i]
     const exerciceId = await resolveExerciceId(ex, userId)
-    if (!exerciceId) continue // Best effort
+    if (!exerciceId) continue
 
     for (const serie of (ex.series || [])) {
       seriesRows.push({
@@ -234,11 +217,9 @@ async function saveParseResult(result, seanceId, userId) {
       })
     }
 
-    // Ajouter au récap
     savedItems.push({ type: 'exercice', nom: ex.nom, series: ex.series })
   }
 
-  // Insert groupé de toutes les séries
   if (seriesRows.length > 0) {
     const { error } = await supabase.from('series').insert(seriesRows)
     if (error) throw new Error(`Séries : ${error.message}`)
@@ -249,12 +230,14 @@ async function saveParseResult(result, seanceId, userId) {
 }
 
 // ══════════════════════════════════════════════════════════════
-// Page Séance — saisie NLP multi-passes + validation + sauvegarde DB
+// Page Séance — saisie NLP multi-passes + templates + coaching
 // ══════════════════════════════════════════════════════════════
 export default function SeancePage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [authLoading, setAuthLoading] = useState(true)
   const [userId, setUserId] = useState(null)
+  const [userUnite, setUserUnite] = useState('kg') // unité du profil
 
   // Séance en cours
   const [activeSeanceId, setActiveSeanceId] = useState(null)
@@ -269,15 +252,24 @@ export default function SeancePage() {
   const [errorMsg, setErrorMsg] = useState('')
 
   // Coaching IA (violet)
-  const [coachingResult, setCoachingResult] = useState(null) // { message, plan }
+  const [coachingResult, setCoachingResult] = useState(null)
   const [coachingLoading, setCoachingLoading] = useState(false)
   const [coachingError, setCoachingError] = useState('')
-  const [afterBilan, setAfterBilan] = useState(null) // message d'analyse post-séance
+  const [afterBilan, setAfterBilan] = useState(null)
+  const [pendingCoachingBefore, setPendingCoachingBefore] = useState(null) // coaching before en attente de séance
+
+  // Templates
+  const [templates, setTemplates] = useState([])
+  const [templateChecklist, setTemplateChecklist] = useState(null) // exercices du template en cours
+  const [loggedExercices, setLoggedExercices] = useState({}) // { exercice_id: true }
+  const [loggingExercice, setLoggingExercice] = useState(null) // exercice actuellement en train d'être logué
+  const [seriesForm, setSeriesForm] = useState([]) // [{ reps, poids }]
+  const [savingSeries, setSavingSeries] = useState(false)
 
   // ── Détecte si des données non sauvegardées sont en cours ──
   const isDirty = texteInput.trim().length > 0 || status === 'parsed'
 
-  // ── Protection navigation : beforeunload (fermeture onglet / refresh) ──
+  // ── Protection navigation : beforeunload ──
   useEffect(() => {
     if (!isDirty) return
 
@@ -290,8 +282,7 @@ export default function SeancePage() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
   }, [isDirty])
 
-  // ── Protection navigation interne : override router.push ──
-  // On wrappe router.push pour intercepter les navigations internes
+  // ── Protection navigation interne ──
   const safePush = useCallback((url) => {
     if (isDirty) {
       const confirmed = window.confirm(
@@ -311,17 +302,33 @@ export default function SeancePage() {
       }
       setUserId(session.user.id)
 
+      // Charger l'unité du profil
+      const { data: profil } = await supabase
+        .from('profils')
+        .select('unite_poids')
+        .eq('user_id', session.user.id)
+        .single()
+      if (profil?.unite_poids) setUserUnite(profil.unite_poids)
+
+      // ── Charger les templates de l'utilisateur ──
+      const { data: tpls } = await supabase
+        .from('templates')
+        .select('*, template_exercices(exercice_id, ordre, exercices(id, nom, categorie, groupe_musculaire))')
+        .eq('user_id', session.user.id)
+        .order('nom')
+      setTemplates(tpls || [])
+
       // ── Restaurer une séance active depuis localStorage ──
+      let restored = false
       try {
         const stored = localStorage.getItem(LS_KEY)
         if (stored) {
-          const { seanceId, heure, ctx } = JSON.parse(stored)
+          const { seanceId, heure, ctx, templateId } = JSON.parse(stored)
           if (seanceId) {
-            // Vérifier que la séance existe toujours en DB et appartient au user
             const { data: seanceData, error: fetchErr } = await supabase
               .from('seances')
               .select(`
-                id, contexte, heure_debut,
+                id, contexte, heure_debut, template_id,
                 cardio_blocs(type_cardio, duree_minutes),
                 series(exercice_id, num_serie, repetitions, poids_kg, exercices(nom))
               `)
@@ -330,10 +337,8 @@ export default function SeancePage() {
               .single()
 
             if (!fetchErr && seanceData) {
-              // Reconstruire le récap à partir des données DB
               const restoredItems = []
 
-              // Cardio
               for (const bloc of (seanceData.cardio_blocs || [])) {
                 restoredItems.push({
                   type: 'cardio',
@@ -342,7 +347,6 @@ export default function SeancePage() {
                 })
               }
 
-              // Exercices — regrouper les séries par exercice
               const exGroups = {}
               for (const s of (seanceData.series || [])) {
                 const eid = s.exercice_id
@@ -361,15 +365,37 @@ export default function SeancePage() {
               }
               Object.values(exGroups).forEach((g) => restoredItems.push(g))
 
-              // Restaurer l'état
               setActiveSeanceId(seanceId)
               setActiveSeanceData(restoredItems)
               setHeureDebut(heure || seanceData.heure_debut)
               setContexte(ctx || seanceData.contexte || 'maison')
+              restored = true
+
+              // Restaurer la checklist template si applicable
+              if (seanceData.template_id || templateId) {
+                const tId = seanceData.template_id || templateId
+                const matchingTpl = (tpls || []).find((t) => t.id === tId)
+                if (matchingTpl) {
+                  const checklist = (matchingTpl.template_exercices || [])
+                    .sort((a, b) => a.ordre - b.ordre)
+                    .map((te) => ({
+                      exercice_id: te.exercice_id,
+                      nom: te.exercices?.nom || 'Exercice',
+                      groupe_musculaire: te.exercices?.groupe_musculaire || '',
+                      categorie: te.exercices?.categorie || '',
+                    }))
+                  setTemplateChecklist(checklist)
+
+                  // Marquer les exercices déjà logués
+                  const logged = {}
+                  const loggedIds = [...new Set((seanceData.series || []).map((s) => s.exercice_id))]
+                  for (const eid of loggedIds) logged[eid] = true
+                  setLoggedExercices(logged)
+                }
+              }
 
               console.log('🔄 Séance restaurée depuis localStorage :', seanceId)
             } else {
-              // La séance n'existe plus → nettoyer localStorage
               localStorage.removeItem(LS_KEY)
               console.log('🧹 Séance expirée, localStorage nettoyé')
             }
@@ -380,12 +406,161 @@ export default function SeancePage() {
         localStorage.removeItem(LS_KEY)
       }
 
+      // ── Vérifier si on arrive avec ?template=xxx ──
+      if (!restored) {
+        const templateParam = searchParams.get('template')
+        if (templateParam && tpls) {
+          const tpl = tpls.find((t) => t.id === templateParam)
+          if (tpl) {
+            // Démarrer automatiquement la séance avec ce template
+            await startTemplateSession(tpl, session.user.id)
+          }
+        }
+      }
+
       setAuthLoading(false)
     }
     checkAuth()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router])
 
-  // ── Charger contexte coaching : profil + historique + séance en cours ──
+  // ── Démarrer une séance avec un template ──
+  async function startTemplateSession(tpl, uid) {
+    const now = new Date()
+    const heure = now.toTimeString().split(' ')[0].slice(0, 5)
+    const ctx = tpl.contexte || 'maison'
+
+    const { data: seance, error } = await supabase
+      .from('seances')
+      .insert({
+        user_id: uid || userId,
+        date: now.toISOString().split('T')[0],
+        heure_debut: heure,
+        contexte: ctx,
+        template_id: tpl.id,
+      })
+      .select('id')
+      .single()
+
+    if (error) {
+      console.error('❌ Erreur création séance template :', error.message)
+      return
+    }
+
+    setActiveSeanceId(seance.id)
+    setActiveSeanceData([])
+    setHeureDebut(heure)
+    setContexte(ctx)
+
+    // Persister le coaching before en attente s'il existe
+    if (pendingCoachingBefore) {
+      supabase.from('seances').update({ coaching_before: pendingCoachingBefore }).eq('id', seance.id)
+        .then(() => console.log('✅ Coaching before persisté (différé, template)'))
+        .catch((e) => console.error('⚠️ Persistance coaching before différé échouée :', e))
+      setPendingCoachingBefore(null)
+    }
+
+    // Construire la checklist depuis les exercices du template
+    const checklist = (tpl.template_exercices || [])
+      .sort((a, b) => a.ordre - b.ordre)
+      .map((te) => ({
+        exercice_id: te.exercice_id,
+        nom: te.exercices?.nom || 'Exercice',
+        groupe_musculaire: te.exercices?.groupe_musculaire || '',
+        categorie: te.exercices?.categorie || '',
+      }))
+
+    setTemplateChecklist(checklist)
+    setLoggedExercices({})
+
+    // Persister dans localStorage
+    localStorage.setItem(LS_KEY, JSON.stringify({
+      seanceId: seance.id,
+      heure,
+      ctx,
+      templateId: tpl.id,
+    }))
+
+    console.log('✅ Séance template démarrée :', tpl.nom)
+  }
+
+  // ── Ouvrir le formulaire inline pour loguer un exercice du template ──
+  function handleOpenLog(ex) {
+    setLoggingExercice(ex)
+    // Pré-remplir 3 séries par défaut
+    setSeriesForm([
+      { reps: 10, poids: '' },
+      { reps: 10, poids: '' },
+      { reps: 10, poids: '' },
+    ])
+  }
+
+  // ── Ajouter une série au formulaire ──
+  function handleAddSerieRow() {
+    setSeriesForm((prev) => [...prev, { reps: 10, poids: '' }])
+  }
+
+  // ── Retirer une série du formulaire ──
+  function handleRemoveSerieRow(index) {
+    if (seriesForm.length <= 1) return
+    setSeriesForm((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  // ── Mettre à jour une série dans le formulaire ──
+  function updateSerieForm(index, field, value) {
+    setSeriesForm((prev) => {
+      const next = [...prev]
+      next[index] = { ...next[index], [field]: value }
+      return next
+    })
+  }
+
+  // ── Sauvegarder les séries depuis le formulaire inline ──
+  async function handleSaveSeries() {
+    if (!loggingExercice || !activeSeanceId || !userId) return
+    setSavingSeries(true)
+
+    try {
+      const rows = seriesForm.map((s, i) => {
+        const poidsVal = s.poids !== '' && s.poids !== null ? parseFloat(s.poids) : null
+        return {
+          seance_id: activeSeanceId,
+          exercice_id: loggingExercice.exercice_id,
+          ordre: Object.keys(loggedExercices).length,
+          num_serie: i + 1,
+          repetitions: parseInt(s.reps) || 0,
+          poids_kg: poidsVal != null ? toKg(poidsVal, userUnite) : null,
+        }
+      })
+
+      const { error } = await supabase.from('series').insert(rows)
+      if (error) throw new Error(error.message)
+
+      console.log('✅ Séries logées pour', loggingExercice.nom)
+
+      // Marquer comme logué
+      setLoggedExercices((prev) => ({ ...prev, [loggingExercice.exercice_id]: true }))
+
+      // Ajouter au récap
+      setActiveSeanceData((prev) => [...prev, {
+        type: 'exercice',
+        nom: loggingExercice.nom,
+        series: seriesForm.map((s, i) => ({
+          num_serie: i + 1,
+          repetitions: parseInt(s.reps) || 0,
+          poids_kg: s.poids !== '' && s.poids !== null ? toKg(parseFloat(s.poids), userUnite) : null,
+        })),
+      }])
+
+      setLoggingExercice(null)
+      setSeriesForm([])
+    } catch (err) {
+      console.error('❌ Erreur sauvegarde séries template :', err)
+    }
+    setSavingSeries(false)
+  }
+
+  // ── Charger contexte coaching ──
   async function loadCoachingContext() {
     const { data: profil } = await supabase
       .from('profils')
@@ -404,7 +579,6 @@ export default function SeancePage() {
       .order('date', { ascending: false })
       .limit(10)
 
-    // Si séance en cours, charger ses données complètes
     let seanceEnCours = null
     if (activeSeanceId) {
       const { data } = await supabase
@@ -458,6 +632,39 @@ export default function SeancePage() {
       }
 
       setCoachingResult(data)
+
+      // ── Persister le coaching en DB (fire-and-forget) ──
+      if (data.message) {
+        if (mode === 'before') {
+          // Before est appelé avant création de séance → stocker pour persister plus tard
+          if (activeSeanceId) {
+            supabase.from('seances').update({ coaching_before: data.message }).eq('id', activeSeanceId)
+              .then(() => console.log('✅ Coaching before persisté'))
+              .catch((e) => console.error('⚠️ Persistance coaching before échouée :', e))
+          } else {
+            setPendingCoachingBefore(data.message)
+          }
+        } else if (mode === 'during' && activeSeanceId) {
+          // Concaténer les during successifs avec séparateur
+          try {
+            const { data: current } = await supabase
+              .from('seances')
+              .select('coaching_during')
+              .eq('id', activeSeanceId)
+              .single()
+            const updated = current?.coaching_during
+              ? current.coaching_during + '\n\n---\n\n' + data.message
+              : data.message
+            await supabase
+              .from('seances')
+              .update({ coaching_during: updated })
+              .eq('id', activeSeanceId)
+            console.log('✅ Coaching during persisté')
+          } catch (e) {
+            console.error('⚠️ Persistance coaching during échouée :', e)
+          }
+        }
+      }
     } catch (err) {
       setCoachingError('Erreur réseau coaching.')
     }
@@ -468,14 +675,12 @@ export default function SeancePage() {
   function handleUsePlan(plan) {
     if (!plan || plan.length === 0) return
 
-    // Convertir le plan en texte NLP
     const lines = plan.map((item) => {
       if (item.type === 'cardio') {
         let s = `${item.nom} ${item.duree_minutes} min`
         if (item.rpe_cible) s += ` RPE ${item.rpe_cible}`
         return s
       }
-      // Exercice
       let s = item.nom
       if (item.poids_suggere) {
         s += ` ${item.poids_suggere}${item.poids_unite || 'kg'}`
@@ -488,7 +693,6 @@ export default function SeancePage() {
     setTexteInput(texte)
     setCoachingResult(null)
 
-    // Lancer l'analyse automatiquement après un court délai (pour que le state se mette à jour)
     setTimeout(async () => {
       setStatus('loading')
       setErrorMsg('')
@@ -543,9 +747,9 @@ export default function SeancePage() {
     }
   }
 
-  // ── Retour textarea avec texte pré-rempli ──
+  // ── Retour textarea ──
   function handleModify() {
-    setStatus(activeSeanceId ? 'idle' : 'idle')
+    setStatus('idle')
     setParseResult(null)
   }
 
@@ -558,9 +762,8 @@ export default function SeancePage() {
 
     try {
       const now = new Date()
-      const heure = now.toTimeString().split(' ')[0].slice(0, 5) // HH:MM
+      const heure = now.toTimeString().split(' ')[0].slice(0, 5)
 
-      // Créer la séance
       const { data: seanceData, error: seanceError } = await supabase
         .from('seances')
         .insert({
@@ -578,18 +781,23 @@ export default function SeancePage() {
       const seanceId = seanceData.id
       console.log('✅ Séance créée :', seanceId)
 
-      // Sauvegarder cardio + exercices + séries
+      // Persister le coaching before en attente s'il existe
+      if (pendingCoachingBefore) {
+        supabase.from('seances').update({ coaching_before: pendingCoachingBefore }).eq('id', seanceId)
+          .then(() => console.log('✅ Coaching before persisté (différé)'))
+          .catch((e) => console.error('⚠️ Persistance coaching before différé échouée :', e))
+        setPendingCoachingBefore(null)
+      }
+
       const savedItems = await saveParseResult(parseResult, seanceId, userId)
 
-      // Passer en mode séance active
       setActiveSeanceId(seanceId)
       setActiveSeanceData(savedItems)
       setHeureDebut(heure)
       setTexteInput('')
       setParseResult(null)
-      setStatus('idle') // Prêt pour la passe suivante
+      setStatus('idle')
 
-      // Persister dans localStorage pour survivre à la navigation
       localStorage.setItem(LS_KEY, JSON.stringify({
         seanceId,
         heure,
@@ -611,7 +819,6 @@ export default function SeancePage() {
     setErrorMsg('')
 
     try {
-      // Mettre à jour texte_brut (concaténer)
       const { data: currentSeance } = await supabase
         .from('seances')
         .select('texte_brut')
@@ -627,16 +834,13 @@ export default function SeancePage() {
 
       console.log('✅ texte_brut mis à jour')
 
-      // Sauvegarder cardio + exercices + séries
       const savedItems = await saveParseResult(parseResult, activeSeanceId, userId)
 
-      // Mettre à jour le récap
       setActiveSeanceData((prev) => [...prev, ...savedItems])
       setTexteInput('')
       setParseResult(null)
       setStatus('idle')
 
-      // Mettre à jour localStorage (la séance est déjà persistée, mais on rafraîchit)
       localStorage.setItem(LS_KEY, JSON.stringify({
         seanceId: activeSeanceId,
         heure: heureDebut,
@@ -655,7 +859,6 @@ export default function SeancePage() {
     if (!activeSeanceId || !heureDebut) return
 
     try {
-      // Calculer la durée totale en minutes
       const now = new Date()
       const [h, m] = heureDebut.split(':').map(Number)
       const debut = new Date()
@@ -669,7 +872,7 @@ export default function SeancePage() {
 
       console.log('✅ Séance terminée — durée :', dureeMinutes, 'min')
 
-      // ── Coaching AFTER : analyse post-séance (bonus, ne bloque pas le flow) ──
+      // ── Coaching AFTER (bonus, non bloquant) ──
       try {
         const { profil, historique, seanceEnCours } = await loadCoachingContext()
         if (profil) {
@@ -687,11 +890,16 @@ export default function SeancePage() {
           if (res.ok) {
             const data = await res.json()
             if (data.message) {
-              // Nettoyer localStorage
+              // Persister coaching after en DB (fire-and-forget)
+              supabase
+                .from('seances')
+                .update({ coaching_after: data.message })
+                .eq('id', activeSeanceId)
+                .then(() => console.log('✅ Coaching after persisté'))
+                .catch((e) => console.error('⚠️ Persistance coaching after échouée :', e))
+
               localStorage.removeItem(LS_KEY)
-              // Afficher le bilan AVANT de reset — garde l'écran de bilan
               setAfterBilan(data.message)
-              // Reset la séance mais ne pas naviguer
               setActiveSeanceId(null)
               setActiveSeanceData([])
               setHeureDebut(null)
@@ -700,7 +908,9 @@ export default function SeancePage() {
               setStatus('idle')
               setContexte('maison')
               setCoachingResult(null)
-              return // On reste sur l'écran bilan
+              setTemplateChecklist(null)
+              setLoggedExercices({})
+              return
             }
           }
         }
@@ -718,6 +928,8 @@ export default function SeancePage() {
       setStatus('idle')
       setContexte('maison')
       setCoachingResult(null)
+      setTemplateChecklist(null)
+      setLoggedExercices({})
 
       router.push('/')
     } catch (err) {
@@ -725,7 +937,7 @@ export default function SeancePage() {
     }
   }
 
-  // ── Fermer le bilan et rediriger vers l'accueil ──
+  // ── Fermer le bilan et rediriger ──
   function handleCloseBilan() {
     setAfterBilan(null)
     router.push('/')
@@ -770,9 +982,7 @@ export default function SeancePage() {
 
   // Détecter si on est en mode séance active
   const isActive = activeSeanceId !== null
-  // En mode saisie : idle, loading, error (pas parsed, pas saving)
   const isInputMode = status === 'idle' || status === 'loading' || status === 'error'
-  // En mode validation
   const isParseMode = status === 'parsed' || status === 'saving'
 
   return (
@@ -794,8 +1004,129 @@ export default function SeancePage() {
         </div>
       )}
 
-      {/* ── RÉCAP DES EXERCICES DÉJÀ ENREGISTRÉS ── */}
-      {isActive && activeSeanceData.length > 0 && isInputMode && (
+      {/* ── CHECKLIST TEMPLATE (séance active avec template) ── */}
+      {isActive && templateChecklist && isInputMode && (
+        <div
+          className="rounded-[10px] px-4 py-3 mb-4"
+          style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}
+        >
+          <p className="text-xs font-medium mb-2" style={{ color: '#777' }}>
+            📋 Template — {templateChecklist.length} exercices
+          </p>
+
+          <div className="flex flex-col gap-1.5">
+            {templateChecklist.map((ex) => {
+              const isLogged = loggedExercices[ex.exercice_id]
+              const isCurrentlyLogging = loggingExercice?.exercice_id === ex.exercice_id
+
+              return (
+                <div key={ex.exercice_id}>
+                  {/* Ligne exercice */}
+                  <div
+                    className="flex items-center justify-between py-2 px-2 rounded-lg transition-colors"
+                    style={{
+                      background: isLogged ? 'rgba(34,197,94,0.06)' : 'transparent',
+                      border: isCurrentlyLogging ? '1px solid rgba(249,115,22,0.2)' : '1px solid transparent',
+                    }}
+                  >
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      {isLogged && (
+                        <span className="text-xs" style={{ color: '#22c55e' }}>✅</span>
+                      )}
+                      <p className="text-sm truncate" style={{ color: isLogged ? '#22c55e' : '#f0f0f0' }}>
+                        {ex.nom}
+                      </p>
+                      {ex.groupe_musculaire && (
+                        <span className="text-[10px] flex-shrink-0" style={{ color: '#555' }}>
+                          {ex.groupe_musculaire}
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => isCurrentlyLogging ? setLoggingExercice(null) : handleOpenLog(ex)}
+                      className="text-xs px-2.5 py-1 rounded-md flex-shrink-0 ml-2"
+                      style={{
+                        background: isLogged ? 'rgba(34,197,94,0.12)' : 'rgba(249,115,22,0.12)',
+                        color: isLogged ? '#22c55e' : '#f97316',
+                      }}
+                    >
+                      {isCurrentlyLogging ? '▲ Fermer' : isLogged ? '✏️ Modifier' : '📝 Loguer'}
+                    </button>
+                  </div>
+
+                  {/* ── FORMULAIRE INLINE SÉRIES ── */}
+                  {isCurrentlyLogging && (
+                    <div
+                      className="rounded-lg px-3 py-3 mt-1 mb-1"
+                      style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}
+                    >
+                      {/* En-tête colonnes */}
+                      <div className="flex items-center gap-2 mb-2 text-[10px] uppercase tracking-wider" style={{ color: '#555' }}>
+                        <span className="w-10">Série</span>
+                        <span className="flex-1">Reps</span>
+                        <span className="flex-1">Poids ({unitLabel(userUnite)})</span>
+                        <span className="w-6"></span>
+                      </div>
+
+                      {seriesForm.map((serie, i) => (
+                        <div key={i} className="flex items-center gap-2 mb-1.5">
+                          <span className="w-10 text-xs text-center" style={{ color: '#777' }}>{i + 1}</span>
+                          <input
+                            type="number"
+                            value={serie.reps}
+                            onChange={(e) => updateSerieForm(i, 'reps', e.target.value)}
+                            className="flex-1 text-sm px-2 py-1.5 rounded-md outline-none text-center"
+                            style={{ background: 'rgba(255,255,255,0.06)', color: '#f0f0f0', border: '1px solid rgba(255,255,255,0.1)' }}
+                            min="0"
+                          />
+                          <input
+                            type="number"
+                            value={serie.poids}
+                            onChange={(e) => updateSerieForm(i, 'poids', e.target.value)}
+                            placeholder="PDC"
+                            className="flex-1 text-sm px-2 py-1.5 rounded-md outline-none text-center"
+                            style={{ background: 'rgba(255,255,255,0.06)', color: '#f0f0f0', border: '1px solid rgba(255,255,255,0.1)' }}
+                            min="0"
+                            step="0.5"
+                          />
+                          <button
+                            onClick={() => handleRemoveSerieRow(i)}
+                            disabled={seriesForm.length <= 1}
+                            className="w-6 text-xs disabled:opacity-20"
+                            style={{ color: '#ef4444' }}
+                          >×</button>
+                        </div>
+                      ))}
+
+                      {/* Bouton ajouter une série */}
+                      <button
+                        onClick={handleAddSerieRow}
+                        className="w-full text-xs py-1.5 mt-1 rounded-md"
+                        style={{ color: '#777', border: '1px dashed rgba(255,255,255,0.1)' }}
+                      >
+                        + Ajouter une série
+                      </button>
+
+                      {/* Bouton enregistrer */}
+                      <button
+                        onClick={handleSaveSeries}
+                        disabled={savingSeries}
+                        className="w-full mt-2 py-2 text-sm font-semibold rounded-lg disabled:opacity-50"
+                        style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e' }}
+                      >
+                        {savingSeries ? 'Enregistrement...' : '✅ Enregistrer'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── RÉCAP DES EXERCICES DÉJÀ ENREGISTRÉS (hors template checklist) ── */}
+      {isActive && activeSeanceData.length > 0 && !templateChecklist && isInputMode && (
         <div
           className="rounded-[10px] px-4 py-3 mb-4"
           style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}
@@ -840,6 +1171,71 @@ export default function SeancePage() {
               {opt.label}
             </button>
           ))}
+        </div>
+      )}
+
+      {/* ── SECTION TEMPLATES RAPIDES (état idle, pas de séance active) ── */}
+      {!isActive && isInputMode && (
+        <div className="mb-4">
+          {templates.length > 0 ? (
+            <>
+              <p className="text-xs font-medium mb-2" style={{ color: '#777' }}>
+                ⚡ Templates rapides
+              </p>
+              <div
+                className="flex gap-2 overflow-x-auto pb-2"
+                style={{ scrollbarWidth: 'none' }}
+              >
+                {templates.slice(0, 5).map((tpl) => {
+                  const ctxC = CONTEXTE_COLORS[tpl.contexte] || CONTEXTE_COLORS.salle
+                  return (
+                    <button
+                      key={tpl.id}
+                      onClick={() => startTemplateSession(tpl)}
+                      className="flex-shrink-0 px-3 py-2 rounded-lg text-xs font-medium transition-colors"
+                      style={{
+                        background: 'rgba(255,255,255,0.04)',
+                        border: '1px solid rgba(255,255,255,0.1)',
+                        color: '#f0f0f0',
+                      }}
+                    >
+                      {tpl.nom}
+                      <span
+                        className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full"
+                        style={{ background: ctxC.bg, color: ctxC.text }}
+                      >
+                        {tpl.contexte === 'maison' ? '🏠' : tpl.contexte === 'mixte' ? '🔀' : '🏋️'}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+              {templates.length > 5 && (
+                <button
+                  onClick={() => safePush('/templates')}
+                  className="text-xs mt-1"
+                  style={{ color: '#f97316' }}
+                >
+                  Voir tous →
+                </button>
+              )}
+              <button
+                onClick={() => safePush('/templates')}
+                className="text-xs mt-1 block"
+                style={{ color: '#555' }}
+              >
+                Gérer mes templates →
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => safePush('/templates')}
+              className="text-xs"
+              style={{ color: '#555' }}
+            >
+              📋 Créer un template →
+            </button>
+          )}
         </div>
       )}
 
@@ -932,12 +1328,10 @@ export default function SeancePage() {
               className="mt-3 rounded-xl px-4 py-4"
               style={{ background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.2)' }}
             >
-              {/* Message du coach */}
               <p className="text-sm leading-relaxed mb-3 whitespace-pre-wrap" style={{ color: '#e0d4f5' }}>
                 🧠 {coachingResult.message}
               </p>
 
-              {/* Plan suggéré (si présent) */}
               {coachingResult.plan?.length > 0 && (
                 <div className="flex flex-col gap-1.5 mb-3">
                   {coachingResult.plan.map((item, i) => (
@@ -963,7 +1357,6 @@ export default function SeancePage() {
                 </div>
               )}
 
-              {/* Bouton utiliser le plan */}
               {coachingResult.plan?.length > 0 && (
                 <button
                   onClick={() => handleUsePlan(coachingResult.plan)}
@@ -974,7 +1367,6 @@ export default function SeancePage() {
                 </button>
               )}
 
-              {/* Bouton fermer */}
               <button
                 onClick={() => setCoachingResult(null)}
                 className="w-full mt-2 py-2 text-xs rounded-lg"
@@ -1001,12 +1393,10 @@ export default function SeancePage() {
       {/* ── ÉCRAN VALIDATION DU PARSING ── */}
       {isParseMode && parseResult && (
         <div>
-          {/* Titre */}
           <p className="text-base font-semibold mb-4">
             <span style={{ color: '#c084fc' }}>🧠 L'IA a compris :</span>
           </p>
 
-          {/* Cards cardio */}
           {parseResult.cardio?.length > 0 && (
             <div className="flex flex-col gap-2 mb-3">
               {parseResult.cardio.map((bloc, i) => (
@@ -1015,7 +1405,6 @@ export default function SeancePage() {
             </div>
           )}
 
-          {/* Cards exercices */}
           {parseResult.exercices?.length > 0 && (
             <div className="flex flex-col gap-2 mb-4">
               {parseResult.exercices.map((ex, i) => (
@@ -1024,19 +1413,16 @@ export default function SeancePage() {
             </div>
           )}
 
-          {/* Message si aucun résultat */}
           {(!parseResult.cardio || parseResult.cardio.length === 0) && (!parseResult.exercices || parseResult.exercices.length === 0) && (
             <p className="text-sm text-center my-8" style={{ color: '#777' }}>
               Aucun exercice détecté. Essaie de reformuler.
             </p>
           )}
 
-          {/* Message d'erreur de sauvegarde */}
           {errorMsg && (
             <p className="text-sm text-center mb-3" style={{ color: '#ef4444' }}>{errorMsg}</p>
           )}
 
-          {/* Boutons action */}
           <div className="flex gap-3">
             <button
               onClick={isActive ? handleAddToSeance : handleConfirm}
