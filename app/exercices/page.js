@@ -10,6 +10,15 @@ function removeAccents(str) {
   return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
 }
 
+// Normalise une valeur pour format DB technique : minuscules, sans accents, underscores
+function normalizeDbValue(str) {
+  if (!str) return str
+  return removeAccents(str)
+    .toLowerCase()
+    .replace(/\s+/g, '_')
+    .trim()
+}
+
 // Groupes musculaires pour les pills de filtre
 const GROUPES = [
   'Tous', 'Pecs', 'Dos', 'Épaules', 'Biceps', 'Triceps',
@@ -94,7 +103,7 @@ export default function ExercicesPage() {
     if (filtre === 'Tous') return exercices
     if (filtre === 'Cardio') return exercices.filter((ex) => ex.categorie === 'cardio')
     return exercices.filter((ex) =>
-      removeAccents(ex.groupe_musculaire?.toLowerCase()) === removeAccents(filtre.toLowerCase())
+      normalizeDbValue(ex.groupe_musculaire) === normalizeDbValue(filtre)
     )
   }, [exercices, filtre])
 

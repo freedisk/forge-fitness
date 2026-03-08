@@ -113,6 +113,16 @@ function removeAccents(str) {
   return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
 }
 
+// Normalise une valeur pour format DB technique : minuscules, sans accents, underscores
+// "Full Body" → "full_body", "Épaules" → "epaules", "Poids corps" → "poids_corps"
+function normalizeDbValue(str) {
+  if (!str) return str
+  return removeAccents(str)
+    .toLowerCase()
+    .replace(/\s+/g, '_')
+    .trim()
+}
+
 // ── NORMALISATION NOM EXERCICE — anti-doublon ──
 // Normalise pour comparaison : minuscules, tirets→espaces, trim
 function normalizeExerciceName(nom) {
@@ -156,8 +166,8 @@ async function resolveExerciceId(ex, userId) {
     .from('exercices')
     .insert({
       nom: canonicalName,
-      categorie: removeAccents(ex.categorie),
-      groupe_musculaire: removeAccents(ex.groupe_musculaire),
+      categorie: normalizeDbValue(ex.categorie),
+      groupe_musculaire: normalizeDbValue(ex.groupe_musculaire),
       type: ex.type,
       is_custom: true,
       source: 'ia_infere',

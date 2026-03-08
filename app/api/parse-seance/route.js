@@ -46,7 +46,10 @@ Règles IMPÉRATIVES :
 8. Normalise les noms d'exercices en français avec une majuscule initiale (ex: "bench press" → "Développé couché", "pull ups" → "Tractions").
 9. Le champ "nom" doit être le nom canonique normalisé — c'est ce nom qui sera cherché dans le catalogue existant.
 10. cardio et exercices sont des tableaux — ils peuvent être vides [] si non mentionnés.
-11. RPE est une échelle de 1 à 10.`
+11. RPE est une échelle de 1 à 10.
+12. CRITIQUE — Les valeurs de "categorie" doivent être EXACTEMENT une de ces valeurs techniques, en minuscules avec underscores : poids_corps, musculation, mobilite, cardio, autres. JAMAIS "Poids corps", "Poids Corps", ni d'espaces.
+13. CRITIQUE — Les valeurs de "groupe_musculaire" doivent être EXACTEMENT une de ces valeurs techniques, en minuscules avec underscores : pecs, dos, epaules, biceps, triceps, jambes, abdos, full_body. JAMAIS "Full Body", "Épaules", ni de majuscules/accents. Pour le cardio, groupe_musculaire = null.
+14. CRITIQUE — Les valeurs de "type" doivent être EXACTEMENT : poids_corps, halteres, barre, machine. JAMAIS d'espaces ni de majuscules.`
 
 export async function POST(request) {
   try {
