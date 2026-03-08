@@ -41,7 +41,7 @@ Stockage poids TOUJOURS en kg — conversion kg/lbs uniquement à l'affichage
 - [x] Étape 1 : Setup projet + SQL 6 tables + seed catalogue + Vercel
 - [x] Étape 2 : Auth + Profil + Layout bottom nav
 - [x] Étape 3 : Catalogue exercices + badges source
-- [ ] Étape 4 : API Route parse-seance (Haiku) + validation
+- [x] Étape 4 : API Route parse-seance (Haiku) + validation
 - [ ] Étape 5 : Saisie NLP complète + sauvegarde DB
 - [ ] Étape 6 : Historique + progression + PR
 - [ ] Étape 7 : API Route coaching (Sonnet) — 3 modes
