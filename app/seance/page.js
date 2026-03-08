@@ -268,6 +268,12 @@ export default function SeancePage() {
   const [contexte, setContexte] = useState('maison')
   const [errorMsg, setErrorMsg] = useState('')
 
+  // Coaching IA (violet)
+  const [coachingResult, setCoachingResult] = useState(null) // { message, plan }
+  const [coachingLoading, setCoachingLoading] = useState(false)
+  const [coachingError, setCoachingError] = useState('')
+  const [afterBilan, setAfterBilan] = useState(null) // message d'analyse post-séance
+
   // ── Détecte si des données non sauvegardées sont en cours ──
   const isDirty = texteInput.trim().length > 0 || status === 'parsed'
 
@@ -378,6 +384,134 @@ export default function SeancePage() {
     }
     checkAuth()
   }, [router])
+
+  // ── Charger contexte coaching : profil + historique + séance en cours ──
+  async function loadCoachingContext() {
+    const { data: profil } = await supabase
+      .from('profils')
+      .select('*')
+      .eq('user_id', userId)
+      .single()
+
+    const { data: historique } = await supabase
+      .from('seances')
+      .select(`
+        id, date, contexte, duree_totale,
+        cardio_blocs(type_cardio, duree_minutes, rpe, calories),
+        series(num_serie, repetitions, poids_kg, exercices(nom, categorie, groupe_musculaire))
+      `)
+      .eq('user_id', userId)
+      .order('date', { ascending: false })
+      .limit(10)
+
+    // Si séance en cours, charger ses données complètes
+    let seanceEnCours = null
+    if (activeSeanceId) {
+      const { data } = await supabase
+        .from('seances')
+        .select(`
+          id, date, contexte, heure_debut, duree_totale,
+          cardio_blocs(type_cardio, duree_minutes, rpe, calories),
+          series(num_serie, repetitions, poids_kg, exercices(nom, categorie, groupe_musculaire))
+        `)
+        .eq('id', activeSeanceId)
+        .single()
+      if (data) seanceEnCours = data
+    }
+
+    return { profil, historique: historique || [], seanceEnCours }
+  }
+
+  // ── Appel coaching IA ──
+  async function handleCoaching(mode) {
+    setCoachingLoading(true)
+    setCoachingError('')
+    setCoachingResult(null)
+
+    try {
+      const { profil, historique, seanceEnCours } = await loadCoachingContext()
+
+      if (!profil) {
+        setCoachingError('Remplis ton profil pour un coaching personnalisé.')
+        setCoachingLoading(false)
+        return
+      }
+
+      const res = await fetch('/api/coaching', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode,
+          profil,
+          historique,
+          seanceEnCours,
+          contexte,
+        }),
+      })
+
+      const data = await res.json()
+
+      if (!res.ok) {
+        setCoachingError(data.error || 'Erreur coaching.')
+        setCoachingLoading(false)
+        return
+      }
+
+      setCoachingResult(data)
+    } catch (err) {
+      setCoachingError('Erreur réseau coaching.')
+    }
+    setCoachingLoading(false)
+  }
+
+  // ── Utiliser le plan suggéré par le coach ──
+  function handleUsePlan(plan) {
+    if (!plan || plan.length === 0) return
+
+    // Convertir le plan en texte NLP
+    const lines = plan.map((item) => {
+      if (item.type === 'cardio') {
+        let s = `${item.nom} ${item.duree_minutes} min`
+        if (item.rpe_cible) s += ` RPE ${item.rpe_cible}`
+        return s
+      }
+      // Exercice
+      let s = item.nom
+      if (item.poids_suggere) {
+        s += ` ${item.poids_suggere}${item.poids_unite || 'kg'}`
+      }
+      s += ` ${item.series_suggerees}x${item.reps_suggerees}`
+      return s
+    })
+
+    const texte = lines.join(', ')
+    setTexteInput(texte)
+    setCoachingResult(null)
+
+    // Lancer l'analyse automatiquement après un court délai (pour que le state se mette à jour)
+    setTimeout(async () => {
+      setStatus('loading')
+      setErrorMsg('')
+      try {
+        const res = await fetch('/api/parse-seance', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ texte }),
+        })
+        const data = await res.json()
+        if (!res.ok) {
+          setErrorMsg(data.error || 'Erreur inconnue.')
+          setStatus('error')
+          return
+        }
+        setParseResult(data)
+        setStatus('parsed')
+      } catch (err) {
+        setErrorMsg('Erreur réseau.')
+        setStatus('error')
+      }
+    }, 100)
+  }
 
   // ── Appel API parse-seance ──
   async function handleAnalyze() {
@@ -535,10 +669,47 @@ export default function SeancePage() {
 
       console.log('✅ Séance terminée — durée :', dureeMinutes, 'min')
 
-      // Nettoyer localStorage
-      localStorage.removeItem(LS_KEY)
+      // ── Coaching AFTER : analyse post-séance (bonus, ne bloque pas le flow) ──
+      try {
+        const { profil, historique, seanceEnCours } = await loadCoachingContext()
+        if (profil) {
+          const res = await fetch('/api/coaching', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              mode: 'after',
+              profil,
+              historique,
+              seanceEnCours,
+              contexte,
+            }),
+          })
+          if (res.ok) {
+            const data = await res.json()
+            if (data.message) {
+              // Nettoyer localStorage
+              localStorage.removeItem(LS_KEY)
+              // Afficher le bilan AVANT de reset — garde l'écran de bilan
+              setAfterBilan(data.message)
+              // Reset la séance mais ne pas naviguer
+              setActiveSeanceId(null)
+              setActiveSeanceData([])
+              setHeureDebut(null)
+              setTexteInput('')
+              setParseResult(null)
+              setStatus('idle')
+              setContexte('maison')
+              setCoachingResult(null)
+              return // On reste sur l'écran bilan
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('⚠️ Coaching after échoué (non bloquant) :', e)
+      }
 
-      // Reset complet
+      // Si coaching after échoue → redirect normal
+      localStorage.removeItem(LS_KEY)
       setActiveSeanceId(null)
       setActiveSeanceData([])
       setHeureDebut(null)
@@ -546,6 +717,7 @@ export default function SeancePage() {
       setParseResult(null)
       setStatus('idle')
       setContexte('maison')
+      setCoachingResult(null)
 
       router.push('/')
     } catch (err) {
@@ -553,10 +725,45 @@ export default function SeancePage() {
     }
   }
 
+  // ── Fermer le bilan et rediriger vers l'accueil ──
+  function handleCloseBilan() {
+    setAfterBilan(null)
+    router.push('/')
+  }
+
   if (authLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <p style={{ color: '#777' }}>Chargement...</p>
+      </div>
+    )
+  }
+
+  // ── ÉCRAN BILAN POST-SÉANCE (coaching after) ──
+  if (afterBilan) {
+    return (
+      <div className="min-h-screen px-4 pt-8 pb-4 flex flex-col">
+        <h1 className="text-2xl font-bold mb-6" style={{ color: '#f0f0f0' }}>⚡ Séance terminée</h1>
+
+        <div
+          className="rounded-xl px-4 py-5 mb-6"
+          style={{ background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.2)' }}
+        >
+          <p className="text-sm font-semibold mb-3" style={{ color: '#c084fc' }}>
+            🧠 Analyse du coach
+          </p>
+          <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: '#e0d4f5' }}>
+            {afterBilan}
+          </p>
+        </div>
+
+        <button
+          onClick={handleCloseBilan}
+          className="w-full py-3.5 text-sm font-bold rounded-xl transition-colors"
+          style={{ background: 'rgba(168,85,247,0.15)', color: '#c084fc', border: '1px solid rgba(168,85,247,0.25)' }}
+        >
+          OK, compris 💪
+        </button>
       </div>
     )
   }
@@ -680,6 +887,102 @@ export default function SeancePage() {
           {/* Message d'erreur */}
           {status === 'error' && errorMsg && (
             <p className="text-sm text-center mt-3" style={{ color: '#ef4444' }}>{errorMsg}</p>
+          )}
+
+          {/* ── BOUTON COACHING ── */}
+          {status !== 'loading' && (
+            <button
+              onClick={() => handleCoaching(isActive ? 'during' : 'before')}
+              disabled={coachingLoading}
+              className="w-full mt-3 py-3 text-sm font-semibold rounded-[10px] transition-colors disabled:opacity-50"
+              style={{
+                background: 'rgba(168,85,247,0.1)',
+                color: '#c084fc',
+                border: '1px solid rgba(168,85,247,0.2)',
+              }}
+            >
+              {coachingLoading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="inline-block w-4 h-4 border-2 border-purple-400/30 border-t-purple-400 rounded-full animate-spin" />
+                  Le coach réfléchit...
+                </span>
+              ) : isActive ? (
+                '🧠 Quoi faire ensuite ?'
+              ) : (
+                '🧠 Demander un plan au coach'
+              )}
+            </button>
+          )}
+
+          {/* Erreur coaching */}
+          {coachingError && (
+            <p className="text-xs text-center mt-2" style={{ color: '#c084fc' }}>
+              {coachingError}
+              {coachingError.includes('profil') && (
+                <a href="/profil" className="underline ml-1" style={{ color: '#a855f7' }}>
+                  Aller au profil →
+                </a>
+              )}
+            </p>
+          )}
+
+          {/* ── RÉSULTAT COACHING (message + plan) ── */}
+          {coachingResult && (
+            <div
+              className="mt-3 rounded-xl px-4 py-4"
+              style={{ background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.2)' }}
+            >
+              {/* Message du coach */}
+              <p className="text-sm leading-relaxed mb-3 whitespace-pre-wrap" style={{ color: '#e0d4f5' }}>
+                🧠 {coachingResult.message}
+              </p>
+
+              {/* Plan suggéré (si présent) */}
+              {coachingResult.plan?.length > 0 && (
+                <div className="flex flex-col gap-1.5 mb-3">
+                  {coachingResult.plan.map((item, i) => (
+                    <div
+                      key={i}
+                      className="rounded-lg px-3 py-2"
+                      style={{ background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.15)' }}
+                    >
+                      <p className="text-sm font-medium" style={{ color: '#c084fc' }}>
+                        {item.type === 'cardio' ? '🏃' : '💪'} {item.nom}
+                        <span className="font-normal text-xs ml-2" style={{ color: '#a78bfa' }}>
+                          {item.type === 'cardio'
+                            ? `${item.duree_minutes} min${item.rpe_cible ? ` · RPE ${item.rpe_cible}` : ''}`
+                            : `${item.series_suggerees}×${item.reps_suggerees}${item.poids_suggere ? ` × ${item.poids_suggere} ${item.poids_unite || 'kg'}` : ''}`
+                          }
+                        </span>
+                      </p>
+                      {item.raison && (
+                        <p className="text-xs mt-0.5" style={{ color: '#8b7ab8' }}>{item.raison}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Bouton utiliser le plan */}
+              {coachingResult.plan?.length > 0 && (
+                <button
+                  onClick={() => handleUsePlan(coachingResult.plan)}
+                  className="w-full py-2.5 text-sm font-semibold rounded-lg transition-colors"
+                  style={{ background: 'rgba(168,85,247,0.15)', color: '#c084fc', border: '1px solid rgba(168,85,247,0.25)' }}
+                >
+                  {isActive ? '➕ Ajouter ces suggestions' : 'Utiliser ce plan →'}
+                </button>
+              )}
+
+              {/* Bouton fermer */}
+              <button
+                onClick={() => setCoachingResult(null)}
+                className="w-full mt-2 py-2 text-xs rounded-lg"
+                style={{ color: '#8b7ab8' }}
+              >
+                Fermer
+              </button>
+            </div>
           )}
 
           {/* Bouton Terminer la séance (seulement si séance active) */}
