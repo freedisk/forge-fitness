@@ -128,7 +128,7 @@ async function resolveExerciceId(ex, userId) {
       nom: ex.nom,
       categorie: ex.categorie,
       groupe_musculaire: ex.groupe_musculaire,
-      type_equipement: ex.type,
+      type: ex.type,
       is_custom: true,
       source: 'ia_infere',
       user_id: userId,
