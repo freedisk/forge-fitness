@@ -107,25 +107,49 @@ function RecapExerciceLine({ item }) {
   )
 }
 
+// ── NORMALISATION NOM EXERCICE — anti-doublon ──
+// Normalise pour comparaison : minuscules, tirets→espaces, trim
+function normalizeExerciceName(nom) {
+  return nom
+    .toLowerCase()
+    .replace(/-/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+// Format canonique pour stockage : majuscule initiale, espaces, pas de tirets
+function canonicalizeExerciceName(nom) {
+  const normalized = normalizeExerciceName(nom)
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1)
+}
+
 // ── LOGIQUE AUTO-LEARNING : chercher ou créer un exercice ──
 async function resolveExerciceId(ex, userId) {
-  // Chercher dans le catalogue (ILIKE = insensible à la casse)
-  const { data: found } = await supabase
-    .from('exercices')
-    .select('id')
-    .ilike('nom', ex.nom)
-    .limit(1)
+  const normalizedInput = normalizeExerciceName(ex.nom)
 
-  if (found && found.length > 0) {
-    console.log(`📖 Exercice trouvé : "${ex.nom}" → id=${found[0].id}`)
-    return found[0].id
+  // Charger tous les exercices accessibles : catalogue global + exercices du user
+  const { data: allExercices } = await supabase
+    .from('exercices')
+    .select('id, nom')
+    .or(`user_id.is.null,user_id.eq.${userId}`)
+
+  // Comparer les noms normalisés des deux côtés
+  if (allExercices && allExercices.length > 0) {
+    const match = allExercices.find(
+      (e) => normalizeExerciceName(e.nom) === normalizedInput
+    )
+    if (match) {
+      console.log(`📖 Exercice trouvé (normalisé) : "${ex.nom}" → "${match.nom}" id=${match.id}`)
+      return match.id
+    }
   }
 
-  // Auto-learning : créer l'exercice avec source='ia_infere'
+  // Auto-learning : créer avec le nom canonique (majuscule initiale, espaces)
+  const canonicalName = canonicalizeExerciceName(ex.nom)
   const { data: created, error } = await supabase
     .from('exercices')
     .insert({
-      nom: ex.nom,
+      nom: canonicalName,
       categorie: ex.categorie,
       groupe_musculaire: ex.groupe_musculaire,
       type: ex.type,
@@ -137,11 +161,11 @@ async function resolveExerciceId(ex, userId) {
     .single()
 
   if (error) {
-    console.error(`⚠️ Impossible de créer "${ex.nom}" :`, error.message)
+    console.error(`⚠️ Impossible de créer "${canonicalName}" :`, error.message)
     return null
   }
 
-  console.log(`🧠 Exercice auto-créé : "${ex.nom}" → id=${created.id}`)
+  console.log(`🧠 Exercice auto-créé : "${canonicalName}" → id=${created.id}`)
   return created.id
 }
 
