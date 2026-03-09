@@ -51,6 +51,7 @@ Stockage poids TOUJOURS en kg — conversion kg/lbs uniquement à l'affichage
 - [x] Mini-étape : Écran bilan fin de séance — durée éditable + calories Apple Watch + RPE 1-10 + coaching after enrichi
 - [x] Étape 9 : Dashboard Home — KPIs + heatmap 12 semaines + CTA + dernière séance
 - [x] Étape 10 : Polish final — retry/fallback IA, animations (parsing, PR pulse, toasts), responsive iPhone (safe area, touch targets, no-zoom), edge cases (séance vide, double-clic), favicon ⚡, manifest PWA
+- [x] Page Stats : statistiques détaillées + graphiques Recharts
 
 ## Fonctionnalités coaching IA
 - Coaching IA persisté en DB (coaching_before, coaching_during, coaching_after dans seances)
@@ -88,7 +89,16 @@ Stockage poids TOUJOURS en kg — conversion kg/lbs uniquement à l'affichage
 - PWA : manifest.json, favicon SVG ⚡, apple-mobile-web-app-capable
 - Toast notifications : succès (vert) / erreur (rouge), auto-dismiss 3s
 
+## Page Stats
+- Filtre période : 7j / 30j / 90j / Tout (pills, défaut 30j)
+- Résumé : nb séances, durée totale, calories, nb séries
+- BarChart volume par semaine (Recharts)
+- PieChart répartition par groupe musculaire (donut, légende)
+- LineChart progression par exercice (sélecteur, max poids ou reps)
+- Records PR all-time (liste ordonnée, conversion kg/lbs)
+- Responsive mobile, tooltips dark, skeleton loading
+
 ## Statut
-✅ FORGE MVP COMPLET — 10/10 étapes
+✅ FORGE MVP COMPLET — 10/10 étapes + Stats
 Production : https://forge-fitness-one.vercel.app/
 Repo : https://github.com/freedisk/forge-fitness
