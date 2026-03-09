@@ -122,7 +122,12 @@ Stockage poids TOUJOURS en kg — conversion kg/lbs uniquement à l'affichage
 - Récap séance en cours visible en permanence
 - Zéro IA, zéro coût API — INSERT direct en DB
 
+## Améliorations UX
+- Dernière performance affichée dans la checklist template (pré-remplissage + résumé "3×10 × 60kg — il y a 3j")
+- Batch loading des dernières perfs (1 requête pour tous les exercices du template)
+- Suppression séance depuis la liste /historique (bouton 🗑️, confirmation avec date, optimistic update, CASCADE)
+
 ## Statut
-✅ FORGE MVP COMPLET — 10/10 étapes + Stats + Édition séance + Mode manuel
+✅ FORGE MVP COMPLET — 10/10 étapes + Stats + Édition séance + Mode manuel + Améliorations UX
 Production : https://forge-fitness-one.vercel.app/
 Repo : https://github.com/freedisk/forge-fitness

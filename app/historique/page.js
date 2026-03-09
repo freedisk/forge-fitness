@@ -112,6 +112,33 @@ export default function HistoriquePage() {
   const [unite, setUnite] = useState('kg')
   const [prMap, setPrMap] = useState({})
 
+  // ── Suppression rapide d'une séance depuis la liste ──
+  async function handleDeleteSeance(e, seanceId, seanceDate) {
+    e.preventDefault()      // empêche la navigation <Link>
+    e.stopPropagation()     // empêche le clic sur la card
+
+    const dateFormatted = new Date(seanceDate + 'T00:00:00').toLocaleDateString('fr-FR', {
+      day: 'numeric', month: 'long', year: 'numeric',
+    })
+
+    if (!confirm(`Supprimer la séance du ${dateFormatted} ?\n\nCette action est irréversible. Toutes les séries et blocs cardio associés seront supprimés.`)) {
+      return
+    }
+
+    const { error: delError } = await supabase
+      .from('seances')
+      .delete()
+      .eq('id', seanceId)
+
+    if (!delError) {
+      // Optimistic update : retirer de la liste locale
+      setSeances((prev) => prev.filter((s) => s.id !== seanceId))
+    } else {
+      console.error('Erreur suppression séance:', delError)
+      alert('Erreur lors de la suppression.')
+    }
+  }
+
   useEffect(() => {
     async function load() {
       const { data: { session } } = await supabase.auth.getSession()
@@ -253,6 +280,30 @@ export default function HistoriquePage() {
                     ))}
                   </div>
                 )}
+
+                {/* Bouton supprimer — en bas à droite */}
+                <div className="flex justify-end mt-1">
+                  <button
+                    onClick={(e) => handleDeleteSeance(e, seance.id, seance.date)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#777',
+                      fontSize: 16,
+                      cursor: 'pointer',
+                      padding: 8,
+                      borderRadius: 8,
+                      minWidth: 44,
+                      minHeight: 44,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                    title="Supprimer cette séance"
+                  >
+                    🗑️
+                  </button>
+                </div>
               </div>
             </Link>
           )

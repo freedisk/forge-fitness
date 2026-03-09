@@ -253,6 +253,9 @@ function SeancePage() {
   })
   const [manualSaving, setManualSaving] = useState(false)
 
+  // ── Dernières performances batch (checklist template) ──
+  const [lastPerformances, setLastPerformances] = useState({}) // { exercice_id: { date, series } }
+
   // ── Afficher un toast temporaire ──
   function showToast(message, type = 'success') {
     setToast({ message, type })
@@ -392,6 +395,12 @@ function SeancePage() {
                   const loggedIds = [...new Set((seanceData.series || []).map((s) => s.exercice_id))]
                   for (const eid of loggedIds) logged[eid] = true
                   setLoggedExercices(logged)
+
+                  // Charger les dernières performances batch pour le template restauré
+                  const exoIds = checklist.map((e) => e.exercice_id)
+                  getLastPerformanceBatch(exoIds).then((perfs) => {
+                    setLastPerformances(perfs)
+                  })
                 }
               }
 
@@ -473,6 +482,13 @@ function SeancePage() {
 
     setTemplateChecklist(checklist)
     setLoggedExercices({})
+
+    // Charger les dernières performances en batch pour tous les exercices du template
+    const exoIds = checklist.map((e) => e.exercice_id)
+    getLastPerformanceBatch(exoIds).then((perfs) => {
+      setLastPerformances(perfs)
+      console.log('✅ Dernières performances chargées pour', Object.keys(perfs).length, 'exercices')
+    })
 
     // Persister dans localStorage
     localStorage.setItem(LS_KEY, JSON.stringify({
@@ -564,9 +580,48 @@ function SeancePage() {
     }
   }
 
+  // Charger les dernières performances en batch (pour tous les exercices du template)
+  async function getLastPerformanceBatch(exerciceIds) {
+    if (exerciceIds.length === 0) return {}
+
+    try {
+      const { data } = await supabase
+        .from('series')
+        .select('exercice_id, num_serie, repetitions, poids_kg, seances!inner(date, user_id)')
+        .in('exercice_id', exerciceIds)
+        .eq('seances.user_id', userId)
+        .order('seances(date)', { ascending: false })
+
+      if (!data) return {}
+
+      // Grouper par exercice_id → prendre la date la plus récente pour chacun
+      const result = {}
+      for (const s of data) {
+        const exoId = s.exercice_id
+        if (!result[exoId]) {
+          result[exoId] = { date: s.seances.date, series: [] }
+        }
+        // Ne garder que les séries de la date la plus récente
+        if (s.seances.date === result[exoId].date) {
+          result[exoId].series.push(s)
+        }
+      }
+
+      // Trier les séries par num_serie
+      for (const exoId of Object.keys(result)) {
+        result[exoId].series.sort((a, b) => a.num_serie - b.num_serie)
+      }
+
+      return result
+    } catch (e) {
+      console.warn('⚠️ Erreur chargement batch dernières perfs :', e)
+      return {}
+    }
+  }
+
   // Formater la dernière performance pour affichage
   function formatLastPerformance(lastPerf) {
-    if (!lastPerf) return "Première fois pour cet exercice 💪"
+    if (!lastPerf) return "Première fois 💪"
 
     const { series, date } = lastPerf
     const daysAgo = Math.floor((new Date() - new Date(date)) / 86400000)
@@ -786,12 +841,22 @@ function SeancePage() {
   // ── Ouvrir le formulaire inline pour loguer un exercice du template ──
   function handleOpenLog(ex) {
     setLoggingExercice(ex)
-    // Pré-remplir 3 séries par défaut
-    setSeriesForm([
-      { reps: 10, poids: '' },
-      { reps: 10, poids: '' },
-      { reps: 10, poids: '' },
-    ])
+
+    // Pré-remplir depuis la dernière performance si disponible
+    const perf = lastPerformances[ex.exercice_id]
+    if (perf && perf.series.length > 0) {
+      setSeriesForm(perf.series.map((s) => ({
+        reps: s.repetitions,
+        poids: s.poids_kg != null ? String(toDisplay(s.poids_kg, userUnite)) : '',
+      })))
+    } else {
+      // 3 séries vides par défaut
+      setSeriesForm([
+        { reps: 10, poids: '' },
+        { reps: 10, poids: '' },
+        { reps: 10, poids: '' },
+      ])
+    }
   }
 
   // ── Ajouter une série au formulaire ──
@@ -1503,35 +1568,52 @@ function SeancePage() {
                 <div key={ex.exercice_id}>
                   {/* Ligne exercice */}
                   <div
-                    className="flex items-center justify-between py-2 px-2 rounded-lg transition-colors"
+                    className="py-2 px-2 rounded-lg transition-colors"
                     style={{
                       background: isLogged ? 'rgba(34,197,94,0.06)' : 'transparent',
                       border: isCurrentlyLogging ? '1px solid rgba(249,115,22,0.2)' : '1px solid transparent',
                     }}
                   >
-                    <div className="flex items-center gap-2 flex-1 min-w-0">
-                      {isLogged && (
-                        <span className="text-xs" style={{ color: '#22c55e' }}>✅</span>
-                      )}
-                      <p className="text-sm truncate" style={{ color: isLogged ? '#22c55e' : '#f0f0f0' }}>
-                        {ex.nom}
-                      </p>
-                      {ex.groupe_musculaire && (
-                        <span className="text-[10px] flex-shrink-0" style={{ color: '#555' }}>
-                          {ex.groupe_musculaire}
-                        </span>
-                      )}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        {isLogged && (
+                          <span className="text-xs" style={{ color: '#22c55e' }}>✅</span>
+                        )}
+                        <p className="text-sm truncate" style={{ color: isLogged ? '#22c55e' : '#f0f0f0' }}>
+                          {ex.nom}
+                        </p>
+                        {ex.groupe_musculaire && (
+                          <span className="text-[10px] flex-shrink-0" style={{ color: '#555' }}>
+                            {ex.groupe_musculaire}
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => isCurrentlyLogging ? setLoggingExercice(null) : handleOpenLog(ex)}
+                        className="text-xs px-2.5 py-1 rounded-md flex-shrink-0 ml-2"
+                        style={{
+                          background: isLogged ? 'rgba(34,197,94,0.12)' : 'rgba(249,115,22,0.12)',
+                          color: isLogged ? '#22c55e' : '#f97316',
+                        }}
+                      >
+                        {isCurrentlyLogging ? '▲ Fermer' : isLogged ? '✏️ Modifier' : '📝 Loguer'}
+                      </button>
                     </div>
-                    <button
-                      onClick={() => isCurrentlyLogging ? setLoggingExercice(null) : handleOpenLog(ex)}
-                      className="text-xs px-2.5 py-1 rounded-md flex-shrink-0 ml-2"
+
+                    {/* Dernière performance */}
+                    <div
                       style={{
-                        background: isLogged ? 'rgba(34,197,94,0.12)' : 'rgba(249,115,22,0.12)',
-                        color: isLogged ? '#22c55e' : '#f97316',
+                        background: 'rgba(255,255,255,0.03)',
+                        borderLeft: '3px solid #3b82f6',
+                        padding: '8px 10px',
+                        margin: '4px 0 8px 0',
+                        borderRadius: '0 6px 6px 0',
                       }}
                     >
-                      {isCurrentlyLogging ? '▲ Fermer' : isLogged ? '✏️ Modifier' : '📝 Loguer'}
-                    </button>
+                      <p style={{ color: '#777', fontSize: '12px', fontStyle: 'italic', margin: 0 }}>
+                        {formatLastPerformance(lastPerformances[ex.exercice_id])}
+                      </p>
+                    </div>
                   </div>
 
                   {/* ── FORMULAIRE INLINE SÉRIES ── */}
