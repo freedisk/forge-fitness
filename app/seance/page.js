@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { toKg, toDisplay, unitLabel } from '@/utils/units'
+import { resolveExerciceId, normalizeDbValue } from '@/utils/exercice-resolver'
 
 // Clé localStorage pour persister la séance active
 const LS_KEY = 'forge_active_seance'
@@ -110,78 +111,8 @@ function ExerciceCard({ exercice }) {
   )
 }
 
-// Supprime les accents/diacritiques — convention DB sans accents
-function removeAccents(str) {
-  if (!str) return str
-  return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-}
-
-// Normalise une valeur pour format DB technique : minuscules, sans accents, underscores
-function normalizeDbValue(str) {
-  if (!str) return str
-  return removeAccents(str)
-    .toLowerCase()
-    .replace(/\s+/g, '_')
-    .trim()
-}
-
-// ── NORMALISATION NOM EXERCICE — anti-doublon ──
-function normalizeExerciceName(nom) {
-  return nom
-    .toLowerCase()
-    .replace(/-/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-// Format canonique pour stockage : majuscule initiale, espaces, pas de tirets
-function canonicalizeExerciceName(nom) {
-  const normalized = normalizeExerciceName(nom)
-  return normalized.charAt(0).toUpperCase() + normalized.slice(1)
-}
-
-// ── LOGIQUE AUTO-LEARNING : chercher ou créer un exercice ──
-async function resolveExerciceId(ex, userId) {
-  const normalizedInput = normalizeExerciceName(ex.nom)
-
-  const { data: allExercices } = await supabase
-    .from('exercices')
-    .select('id, nom')
-    .or(`user_id.is.null,user_id.eq.${userId}`)
-
-  if (allExercices && allExercices.length > 0) {
-    const match = allExercices.find(
-      (e) => normalizeExerciceName(e.nom) === normalizedInput
-    )
-    if (match) {
-      console.log(`📖 Exercice trouvé (normalisé) : "${ex.nom}" → "${match.nom}" id=${match.id}`)
-      return match.id
-    }
-  }
-
-  const canonicalName = canonicalizeExerciceName(ex.nom)
-  const { data: created, error } = await supabase
-    .from('exercices')
-    .insert({
-      nom: canonicalName,
-      categorie: normalizeDbValue(ex.categorie),
-      groupe_musculaire: normalizeDbValue(ex.groupe_musculaire),
-      type: ex.type,
-      is_custom: true,
-      source: 'ia_infere',
-      user_id: userId,
-    })
-    .select('id')
-    .single()
-
-  if (error) {
-    console.error(`⚠️ Impossible de créer "${canonicalName}" :`, error.message)
-    return null
-  }
-
-  console.log(`🧠 Exercice auto-créé : "${canonicalName}" → id=${created.id}`)
-  return created.id
-}
+// ── Fonctions auto-learning importées depuis @/utils/exercice-resolver ──
+// resolveExerciceId, normalizeDbValue
 
 // ── SAUVEGARDER cardio + exercices/séries dans une séance ──
 async function saveParseResult(result, seanceId, userId) {

@@ -4,7 +4,8 @@ import { useState, useEffect } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
-import { toDisplay, unitLabel } from '@/utils/units'
+import { toKg, toDisplay, unitLabel } from '@/utils/units'
+import { resolveExerciceId } from '@/utils/exercice-resolver'
 
 // Labels lisibles pour les types de cardio
 const CARDIO_LABELS = {
@@ -17,6 +18,8 @@ const CARDIO_LABELS = {
   rameur: '🚣 Rameur',
   corde_a_sauter: '⏫ Corde à sauter',
 }
+
+const CARDIO_TYPES = ['course', 'velo', 'elliptique', 'tapis', 'stepper', 'spinning', 'rameur', 'corde_a_sauter']
 
 // Couleurs RPE pour affichage badge
 const RPE_COLORS = {
@@ -35,6 +38,17 @@ const CATEGORIE_COLORS = {
   autres: { bg: 'rgba(255,255,255,0.08)', text: '#999', border: 'rgba(255,255,255,0.12)' },
 }
 
+// Style commun pour les inputs en mode édition
+const editInputStyle = {
+  background: 'rgba(255,255,255,0.06)',
+  border: '1px solid rgba(255,255,255,0.15)',
+  borderRadius: 6,
+  color: '#f0f0f0',
+  fontSize: 16,
+  minHeight: 44,
+  padding: '8px 10px',
+}
+
 // Badge réutilisable
 function Badge({ label, bg, text, border }) {
   return (
@@ -47,7 +61,7 @@ function Badge({ label, bg, text, border }) {
   )
 }
 
-// Formater une date en français lisible : "Lundi 8 mars 2026"
+// Formater une date en français lisible
 function formatDateFr(dateStr) {
   const d = new Date(dateStr + 'T00:00:00')
   const formatted = d.toLocaleDateString('fr-FR', {
@@ -59,7 +73,7 @@ function formatDateFr(dateStr) {
   return formatted.charAt(0).toUpperCase() + formatted.slice(1)
 }
 
-// Regrouper les séries par exercice avec infos complètes
+// Regrouper les séries par exercice
 function groupSeriesByExercice(series) {
   const groups = {}
   for (const s of (series || [])) {
@@ -85,7 +99,7 @@ function groupSeriesByExercice(series) {
 }
 
 // ══════════════════════════════════════════════════════════════
-// Page Détail Séance — exercices, séries, PR, texte brut, suppression
+// Page Détail Séance — lecture + mode édition
 // ══════════════════════════════════════════════════════════════
 export default function SeanceDetailPage() {
   const router = useRouter()
@@ -96,9 +110,11 @@ export default function SeanceDetailPage() {
   const [error, setError] = useState(null)
   const [seance, setSeance] = useState(null)
   const [unite, setUnite] = useState('kg')
+  const [profil, setProfil] = useState(null)
   const [prMap, setPrMap] = useState({})
   const [showTexteBrut, setShowTexteBrut] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [userId, setUserId] = useState(null)
 
   // Coaching IA — blocs repliables
   const [showCoachBefore, setShowCoachBefore] = useState(false)
@@ -112,20 +128,51 @@ export default function SeanceDetailPage() {
   const [savingTemplate, setSavingTemplate] = useState(false)
   const [templateSuccess, setTemplateSuccess] = useState(false)
 
+  // ═══ MODE ÉDITION ═══
+  const [isEditing, setIsEditing] = useState(false)
+  const [addMode, setAddMode] = useState(null) // null | 'nlp' | 'manual' | 'cardio'
+  const [nlpText, setNlpText] = useState('')
+  const [nlpLoading, setNlpLoading] = useState(false)
+  const [nlpResult, setNlpResult] = useState(null)
+  // Ajout manuel
+  const [manualExoId, setManualExoId] = useState('')
+  const [manualNbSeries, setManualNbSeries] = useState(3)
+  const [manualReps, setManualReps] = useState(10)
+  const [manualPoids, setManualPoids] = useState('')
+  const [exercicesCatalogue, setExercicesCatalogue] = useState([])
+  // Ajout cardio manuel
+  const [newCardioType, setNewCardioType] = useState('course')
+  const [newCardioDuree, setNewCardioDuree] = useState('')
+  const [newCardioCalories, setNewCardioCalories] = useState('')
+  const [newCardioRpe, setNewCardioRpe] = useState('')
+
+  // ── Recharger la séance complète ──
+  async function reloadSeance() {
+    const { data } = await supabase
+      .from('seances')
+      .select('*, cardio_blocs(*), series(*, exercices(nom, categorie, groupe_musculaire))')
+      .eq('id', seanceId)
+      .single()
+
+    if (data) setSeance(data)
+  }
+
+  // ── Chargement initial ──
   useEffect(() => {
     async function load() {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) { router.push('/login'); return }
 
-      // Charger le profil pour l'unité de poids
-      const { data: profil } = await supabase
+      setUserId(session.user.id)
+
+      const { data: profilData } = await supabase
         .from('profils')
         .select('unite_poids')
         .eq('user_id', session.user.id)
         .single()
-      if (profil?.unite_poids) setUnite(profil.unite_poids)
+      if (profilData?.unite_poids) setUnite(profilData.unite_poids)
+      setProfil(profilData)
 
-      // Charger la séance avec jointures complètes
       const { data: seanceData, error: fetchError } = await supabase
         .from('seances')
         .select(`
@@ -145,38 +192,29 @@ export default function SeanceDetailPage() {
 
       setSeance(seanceData)
 
-      // ── Calcul des PR pour les exercices de cette séance ──
+      // ── Calcul des PR ──
       const exerciceIds = [...new Set((seanceData.series || []).map((s) => s.exercice_id))]
-
       if (exerciceIds.length > 0) {
-        // Récupérer toutes les séances de l'utilisateur (pour filtrer les séries)
         const { data: userSeances } = await supabase
           .from('seances')
           .select('id')
           .eq('user_id', session.user.id)
         const userSeanceIds = (userSeances || []).map((s) => s.id)
 
-        // Charger toutes les séries de ces exercices (toutes séances du user)
         const { data: allSeries } = await supabase
           .from('series')
           .select('exercice_id, poids_kg, repetitions')
           .in('exercice_id', exerciceIds)
           .in('seance_id', userSeanceIds)
 
-        // Construire la map des PR
         const prs = {}
         for (const s of (allSeries || [])) {
           const eid = s.exercice_id
           if (!prs[eid]) prs[eid] = { maxPoids: null, maxReps: null }
-
           if (s.poids_kg != null) {
-            if (prs[eid].maxPoids === null || s.poids_kg > prs[eid].maxPoids) {
-              prs[eid].maxPoids = s.poids_kg
-            }
+            if (prs[eid].maxPoids === null || s.poids_kg > prs[eid].maxPoids) prs[eid].maxPoids = s.poids_kg
           } else {
-            if (prs[eid].maxReps === null || s.repetitions > prs[eid].maxReps) {
-              prs[eid].maxReps = s.repetitions
-            }
+            if (prs[eid].maxReps === null || s.repetitions > prs[eid].maxReps) prs[eid].maxReps = s.repetitions
           }
         }
         setPrMap(prs)
@@ -187,7 +225,21 @@ export default function SeanceDetailPage() {
     load()
   }, [router, seanceId])
 
-  // Vérifier si une série est un record personnel
+  // ── Charger le catalogue exercices pour ajout manuel ──
+  useEffect(() => {
+    if (!isEditing || !userId) return
+    async function loadCatalogue() {
+      const { data } = await supabase
+        .from('exercices')
+        .select('id, nom, groupe_musculaire')
+        .or(`user_id.is.null,user_id.eq.${userId}`)
+        .order('nom')
+      setExercicesCatalogue(data || [])
+    }
+    loadCatalogue()
+  }, [isEditing, userId])
+
+  // Vérifier si une série est un PR
   function isPR(serie) {
     const pr = prMap[serie.exercice_id]
     if (!pr) return false
@@ -195,27 +247,271 @@ export default function SeanceDetailPage() {
     return serie.repetitions === pr.maxReps
   }
 
-  // Supprimer la séance (DELETE CASCADE gère cardio_blocs + series)
-  async function handleDelete() {
-    if (!confirm('Es-tu sûr de vouloir supprimer cette séance ?')) return
+  // ═══════════════════════════════════════════
+  // FONCTIONS D'ÉDITION
+  // ═══════════════════════════════════════════
 
-    setDeleting(true)
-    const { error: delError } = await supabase
-      .from('seances')
-      .delete()
-      .eq('id', seanceId)
-
-    if (delError) {
-      console.error('❌ Erreur suppression :', delError.message)
-      setDeleting(false)
-      return
+  // ── Mettre à jour une série (onBlur) ──
+  async function updateSerie(serieId, field, value) {
+    let dbValue = value
+    if (field === 'poids_kg' && profil?.unite_poids === 'lbs') {
+      dbValue = toKg(parseFloat(value), 'lbs')
+    }
+    if (field === 'poids_kg' || field === 'repetitions') {
+      dbValue = dbValue === '' || dbValue === null ? null : parseFloat(dbValue)
     }
 
-    console.log('✅ Séance supprimée :', seanceId)
+    const { error } = await supabase
+      .from('series')
+      .update({ [field]: dbValue })
+      .eq('id', serieId)
+
+    if (error) console.error('Erreur update série:', error)
+
+    // Update local state
+    setSeance(prev => ({
+      ...prev,
+      series: prev.series.map(s =>
+        s.id === serieId ? { ...s, [field]: dbValue } : s
+      )
+    }))
+  }
+
+  // ── Supprimer une série ──
+  async function deleteSerie(serieId) {
+    if (!confirm('Supprimer cette série ?')) return
+
+    const { error } = await supabase
+      .from('series')
+      .delete()
+      .eq('id', serieId)
+
+    if (!error) {
+      setSeance(prev => ({
+        ...prev,
+        series: prev.series.filter(s => s.id !== serieId)
+      }))
+    }
+  }
+
+  // ── Ajouter une série à un exercice existant ──
+  async function addSerie(exerciceId, ordre) {
+    const lastSerie = seance.series
+      .filter(s => s.exercice_id === exerciceId)
+      .sort((a, b) => b.num_serie - a.num_serie)[0]
+
+    const newSerie = {
+      seance_id: seance.id,
+      exercice_id: exerciceId,
+      ordre: ordre,
+      num_serie: (lastSerie?.num_serie || 0) + 1,
+      repetitions: lastSerie?.repetitions || 10,
+      poids_kg: lastSerie?.poids_kg || null,
+    }
+
+    const { data, error } = await supabase
+      .from('series')
+      .insert(newSerie)
+      .select('*, exercices(nom, groupe_musculaire, categorie)')
+      .single()
+
+    if (data) {
+      setSeance(prev => ({
+        ...prev,
+        series: [...prev.series, data]
+      }))
+    }
+  }
+
+  // ── Mettre à jour un bloc cardio ──
+  async function updateCardio(blocId, field, value) {
+    const dbValue = value === '' ? null : (isNaN(value) ? value : parseFloat(value))
+
+    const { error } = await supabase
+      .from('cardio_blocs')
+      .update({ [field]: dbValue })
+      .eq('id', blocId)
+
+    if (error) console.error('Erreur update cardio:', error)
+
+    setSeance(prev => ({
+      ...prev,
+      cardio_blocs: prev.cardio_blocs.map(b =>
+        b.id === blocId ? { ...b, [field]: dbValue } : b
+      )
+    }))
+  }
+
+  // ── Supprimer un bloc cardio ──
+  async function deleteCardio(blocId) {
+    if (!confirm('Supprimer ce bloc cardio ?')) return
+
+    const { error } = await supabase
+      .from('cardio_blocs')
+      .delete()
+      .eq('id', blocId)
+
+    if (!error) {
+      setSeance(prev => ({
+        ...prev,
+        cardio_blocs: prev.cardio_blocs.filter(b => b.id !== blocId)
+      }))
+    }
+  }
+
+  // ── Ajouter un bloc cardio manuellement ──
+  async function addCardioBloc() {
+    if (!newCardioDuree) return
+
+    const newBloc = {
+      seance_id: seance.id,
+      type_cardio: newCardioType,
+      duree_minutes: parseInt(newCardioDuree),
+      calories: newCardioCalories ? parseInt(newCardioCalories) : null,
+      rpe: newCardioRpe ? parseInt(newCardioRpe) : null,
+      ordre: (seance.cardio_blocs?.length || 0),
+    }
+
+    const { data: inserted, error } = await supabase
+      .from('cardio_blocs')
+      .insert(newBloc)
+      .select()
+      .single()
+
+    if (inserted) {
+      setSeance(prev => ({
+        ...prev,
+        cardio_blocs: [...(prev.cardio_blocs || []), inserted]
+      }))
+      setNewCardioDuree('')
+      setNewCardioCalories('')
+      setNewCardioRpe('')
+      setAddMode(null)
+    }
+  }
+
+  // ── Mettre à jour une métadonnée de la séance ──
+  async function updateSeanceMeta(field, value) {
+    const { error } = await supabase
+      .from('seances')
+      .update({ [field]: value })
+      .eq('id', seance.id)
+
+    if (error) console.error('Erreur update séance:', error)
+
+    setSeance(prev => ({ ...prev, [field]: value }))
+  }
+
+  // ── NLP : Analyser le texte ──
+  async function handleNlpAnalyze() {
+    if (nlpText.trim().length < 5) return
+    setNlpLoading(true)
+    setNlpResult(null)
+
+    try {
+      const res = await fetch('/api/parse-seance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ texte: nlpText.trim() }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Erreur parsing')
+      setNlpResult(data)
+    } catch (err) {
+      console.error('Erreur NLP:', err)
+    } finally {
+      setNlpLoading(false)
+    }
+  }
+
+  // ── NLP : Confirmer et sauvegarder les résultats ──
+  async function handleNlpConfirm() {
+    if (!nlpResult || !userId) return
+
+    // Insérer cardio
+    if (nlpResult.seance?.cardio?.length > 0) {
+      const cardioRows = nlpResult.seance.cardio.map((c, i) => ({
+        seance_id: seance.id,
+        type_cardio: c.type,
+        duree_minutes: c.duree,
+        calories: c.calories || null,
+        rpe: c.rpe || null,
+        distance_km: c.distance || null,
+        frequence_cardiaque: c.fc || null,
+        ordre: (seance.cardio_blocs?.length || 0) + i,
+      }))
+      await supabase.from('cardio_blocs').insert(cardioRows)
+    }
+
+    // Insérer exercices + séries (avec auto-learning)
+    if (nlpResult.seance?.exercices?.length > 0) {
+      for (const exo of nlpResult.seance.exercices) {
+        const exerciceId = await resolveExerciceId(exo, userId)
+        if (!exerciceId) continue
+
+        const seriesRows = (exo.series || []).map((serie) => ({
+          seance_id: seance.id,
+          exercice_id: exerciceId,
+          ordre: (seance.series?.length || 0) + 1,
+          num_serie: serie.num_serie,
+          repetitions: serie.repetitions,
+          poids_kg: serie.poids_kg || null,
+        }))
+        if (seriesRows.length > 0) {
+          await supabase.from('series').insert(seriesRows)
+        }
+      }
+    }
+
+    // Recharger la séance complète
+    await reloadSeance()
+    setNlpResult(null)
+    setNlpText('')
+    setAddMode(null)
+  }
+
+  // ── Mode manuel : Ajouter un exercice ──
+  async function addManualExercice() {
+    if (!manualExoId || !manualNbSeries || !manualReps) return
+
+    const rows = []
+    for (let i = 0; i < manualNbSeries; i++) {
+      rows.push({
+        seance_id: seance.id,
+        exercice_id: manualExoId,
+        ordre: (seance.series?.length || 0) + 1,
+        num_serie: i + 1,
+        repetitions: parseInt(manualReps),
+        poids_kg: manualPoids ? toKg(parseFloat(manualPoids), profil?.unite_poids || 'kg') : null,
+      })
+    }
+
+    const { data, error } = await supabase
+      .from('series')
+      .insert(rows)
+      .select('*, exercices(nom, groupe_musculaire, categorie)')
+
+    if (data) {
+      setSeance(prev => ({
+        ...prev,
+        series: [...prev.series, ...data]
+      }))
+      setManualExoId('')
+      setManualPoids('')
+      setAddMode(null)
+    }
+  }
+
+  // ── Supprimer la séance ──
+  async function handleDelete() {
+    if (!confirm('Es-tu sûr de vouloir supprimer cette séance ?')) return
+    setDeleting(true)
+    const { error: delError } = await supabase.from('seances').delete().eq('id', seanceId)
+    if (delError) { console.error('❌ Erreur suppression :', delError.message); setDeleting(false); return }
     router.push('/historique')
   }
 
-  // ── Ouvrir la modale sauver comme template ──
+  // ── Sauver comme template ──
   function handleOpenTemplateModal() {
     const dateStr = seance?.date
       ? new Date(seance.date + 'T00:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })
@@ -226,16 +522,13 @@ export default function SeanceDetailPage() {
     setTemplateSuccess(false)
   }
 
-  // ── Sauvegarder comme template ──
   async function handleSaveAsTemplate() {
     if (!templateNom.trim() || !seance) return
     setSavingTemplate(true)
-
     try {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) return
 
-      // Créer le template
       const { data: newTpl, error: tplErr } = await supabase
         .from('templates')
         .insert({
@@ -249,9 +542,7 @@ export default function SeanceDetailPage() {
 
       if (tplErr) throw new Error(tplErr.message)
 
-      // Extraire les exercices uniques dans l'ordre d'apparition
       const exerciceIds = [...new Set((seance.series || []).map((s) => s.exercice_id))]
-
       if (exerciceIds.length > 0) {
         const rows = exerciceIds.map((eid, i) => ({
           template_id: newTpl.id,
@@ -260,8 +551,6 @@ export default function SeanceDetailPage() {
         }))
         await supabase.from('template_exercices').insert(rows)
       }
-
-      console.log('✅ Template créé :', newTpl.id)
       setTemplateSuccess(true)
     } catch (err) {
       console.error('❌ Erreur création template :', err)
@@ -269,7 +558,7 @@ export default function SeanceDetailPage() {
     setSavingTemplate(false)
   }
 
-  // ── États : chargement, erreur ──
+  // ═══ ÉTATS LOADING / ERREUR ═══
 
   if (loading) {
     return (
@@ -294,6 +583,7 @@ export default function SeanceDetailPage() {
 
   const groups = groupSeriesByExercice(seance.series)
 
+  // ═══ RENDER ═══
   return (
     <div className="min-h-screen px-4 pt-8 pb-4">
       {/* Bouton retour */}
@@ -301,66 +591,238 @@ export default function SeanceDetailPage() {
         ← Historique
       </Link>
 
-      {/* ── HEADER ── */}
+      {/* ══ BANDE MODE ÉDITION ══ */}
+      {isEditing && (
+        <div
+          className="mt-3 px-4 py-3 rounded-xl flex items-center justify-between"
+          style={{ background: 'rgba(249,115,22,0.1)', border: '1px solid rgba(249,115,22,0.3)' }}
+        >
+          <p className="text-sm font-semibold" style={{ color: '#f97316' }}>
+            ✏️ Modification en cours
+          </p>
+          <button
+            onClick={() => { setIsEditing(false); setAddMode(null) }}
+            className="px-4 py-2 text-sm font-semibold rounded-lg"
+            style={{ background: 'linear-gradient(135deg, #f97316, #dc2626)', color: '#fff' }}
+          >
+            ✅ Terminé
+          </button>
+        </div>
+      )}
+
+      {/* ══ HEADER ══ */}
       <div className="mt-4 mb-6">
-        <h1 className="text-xl font-bold" style={{ color: '#f0f0f0' }}>
-          {formatDateFr(seance.date)}
-        </h1>
-        <p className="text-xs mt-1" style={{ color: '#777' }}>
-          {seance.contexte === 'salle' ? '🏋️ Salle' : '🏠 Maison'}
-          {seance.heure_debut ? ` · Début ${seance.heure_debut}` : ''}
-          {seance.duree_totale ? ` · ⏱️ ${seance.duree_totale} min` : ''}
-          {seance.calories_totales ? ` · 🔥 ${seance.calories_totales} kcal` : ''}
-        </p>
-        {seance.rpe && (
-          <div className="flex items-center gap-1.5 mt-1.5">
-            <span
-              className="text-[10px] px-2 py-0.5 rounded-full font-semibold"
-              style={{
-                background: `${RPE_COLORS[seance.rpe]}20`,
-                color: RPE_COLORS[seance.rpe],
-                border: `1px solid ${RPE_COLORS[seance.rpe]}40`,
-              }}
-            >
-              💪 RPE {seance.rpe}/10
-            </span>
+        <div className="flex items-start justify-between">
+          <div className="flex-1">
+            {isEditing ? (
+              <input
+                type="date"
+                defaultValue={seance.date}
+                onBlur={(e) => updateSeanceMeta('date', e.target.value)}
+                style={{ ...editInputStyle, width: '100%', maxWidth: 200 }}
+              />
+            ) : (
+              <h1 className="text-xl font-bold" style={{ color: '#f0f0f0' }}>
+                {formatDateFr(seance.date)}
+              </h1>
+            )}
+
+            {isEditing ? (
+              <div className="flex flex-wrap items-center gap-3 mt-2">
+                {/* Contexte toggle */}
+                <div className="flex gap-1">
+                  {['maison', 'salle'].map(ctx => (
+                    <button
+                      key={ctx}
+                      onClick={() => updateSeanceMeta('contexte', ctx)}
+                      className="text-xs px-3 py-1.5 rounded-lg font-medium"
+                      style={{
+                        background: seance.contexte === ctx ? '#f97316' : 'rgba(255,255,255,0.06)',
+                        color: seance.contexte === ctx ? '#fff' : '#777',
+                      }}
+                    >
+                      {ctx === 'salle' ? '🏋️ Salle' : '🏠 Maison'}
+                    </button>
+                  ))}
+                </div>
+                {/* Durée */}
+                <div className="flex items-center gap-1">
+                  <span className="text-xs" style={{ color: '#777' }}>⏱️</span>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    defaultValue={seance.duree_totale || ''}
+                    onBlur={(e) => updateSeanceMeta('duree_totale', e.target.value ? parseInt(e.target.value) : null)}
+                    placeholder="min"
+                    style={{ ...editInputStyle, width: 60, padding: '6px 8px' }}
+                  />
+                  <span className="text-xs" style={{ color: '#777' }}>min</span>
+                </div>
+                {/* Calories */}
+                <div className="flex items-center gap-1">
+                  <span className="text-xs" style={{ color: '#777' }}>🔥</span>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    defaultValue={seance.calories_totales || ''}
+                    onBlur={(e) => updateSeanceMeta('calories_totales', e.target.value ? parseInt(e.target.value) : null)}
+                    placeholder="kcal"
+                    style={{ ...editInputStyle, width: 70, padding: '6px 8px' }}
+                  />
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs mt-1" style={{ color: '#777' }}>
+                {seance.contexte === 'salle' ? '🏋️ Salle' : '🏠 Maison'}
+                {seance.heure_debut ? ` · Début ${seance.heure_debut}` : ''}
+                {seance.duree_totale ? ` · ⏱️ ${seance.duree_totale} min` : ''}
+                {seance.calories_totales ? ` · 🔥 ${seance.calories_totales} kcal` : ''}
+              </p>
+            )}
+
+            {/* RPE */}
+            {isEditing ? (
+              <div className="flex items-center gap-1 mt-2 flex-wrap">
+                <span className="text-xs mr-1" style={{ color: '#777' }}>💪 RPE</span>
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => (
+                  <button
+                    key={n}
+                    onClick={() => updateSeanceMeta('rpe', seance.rpe === n ? null : n)}
+                    className="w-8 h-8 rounded-full text-xs font-bold"
+                    style={{
+                      background: seance.rpe === n ? RPE_COLORS[n] : 'rgba(255,255,255,0.06)',
+                      color: seance.rpe === n ? '#fff' : '#666',
+                      border: seance.rpe === n ? 'none' : '1px solid rgba(255,255,255,0.1)',
+                    }}
+                  >
+                    {n}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              seance.rpe && (
+                <div className="flex items-center gap-1.5 mt-1.5">
+                  <span
+                    className="text-[10px] px-2 py-0.5 rounded-full font-semibold"
+                    style={{
+                      background: `${RPE_COLORS[seance.rpe]}20`,
+                      color: RPE_COLORS[seance.rpe],
+                      border: `1px solid ${RPE_COLORS[seance.rpe]}40`,
+                    }}
+                  >
+                    💪 RPE {seance.rpe}/10
+                  </span>
+                </div>
+              )
+            )}
           </div>
-        )}
+
+          {/* Bouton éditer (mode lecture) */}
+          {!isEditing && (
+            <button
+              onClick={() => setIsEditing(true)}
+              className="text-xs px-3 py-2 rounded-lg font-medium"
+              style={{ color: '#f97316', border: '1px solid rgba(249,115,22,0.3)' }}
+            >
+              ✏️ Modifier
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* ── SECTION CARDIO ── */}
-      {seance.cardio_blocs?.length > 0 && (
+      {/* ══ SECTION CARDIO ══ */}
+      {(seance.cardio_blocs?.length > 0 || isEditing) && (
         <div className="mb-6">
           <p className="text-xs font-medium uppercase tracking-wider mb-2" style={{ color: '#777' }}>
             Cardio
           </p>
           <div className="flex flex-col gap-2">
-            {seance.cardio_blocs.map((bloc, i) => (
+            {(seance.cardio_blocs || []).map((bloc) => (
               <div
-                key={i}
+                key={bloc.id}
                 className="rounded-xl px-4 py-3"
                 style={{
                   background: 'rgba(255,255,255,0.04)',
-                  border: '1px solid rgba(255,255,255,0.08)',
+                  border: isEditing ? '1px dashed rgba(249,115,22,0.3)' : '1px solid rgba(255,255,255,0.08)',
                 }}
               >
-                <p className="text-sm font-medium" style={{ color: '#f0f0f0' }}>
-                  {CARDIO_LABELS[bloc.type_cardio] || bloc.type_cardio}
-                </p>
-                <p className="text-xs mt-1" style={{ color: '#777' }}>
-                  {bloc.duree_minutes ? `${bloc.duree_minutes} min` : ''}
-                  {bloc.distance_km ? ` · ${bloc.distance_km} km` : ''}
-                  {bloc.calories ? ` · ${bloc.calories} kcal` : ''}
-                  {bloc.frequence_cardiaque ? ` · ${bloc.frequence_cardiaque} bpm` : ''}
-                  {bloc.rpe ? ` · RPE ${bloc.rpe}` : ''}
-                </p>
+                {isEditing ? (
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <select
+                        defaultValue={bloc.type_cardio}
+                        onChange={(e) => updateCardio(bloc.id, 'type_cardio', e.target.value)}
+                        style={{ ...editInputStyle, flex: 1, maxWidth: 180 }}
+                      >
+                        {CARDIO_TYPES.map(t => (
+                          <option key={t} value={t}>{CARDIO_LABELS[t] || t}</option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={() => deleteCardio(bloc.id)}
+                        className="ml-2 w-8 h-8 rounded-full flex items-center justify-center text-xs"
+                        style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444' }}
+                      >
+                        ×
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          defaultValue={bloc.duree_minutes || ''}
+                          onBlur={(e) => updateCardio(bloc.id, 'duree_minutes', e.target.value)}
+                          style={{ ...editInputStyle, width: 55, padding: '6px 8px' }}
+                        />
+                        <span className="text-xs" style={{ color: '#777' }}>min</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          defaultValue={bloc.calories || ''}
+                          onBlur={(e) => updateCardio(bloc.id, 'calories', e.target.value)}
+                          placeholder="cal"
+                          style={{ ...editInputStyle, width: 55, padding: '6px 8px' }}
+                        />
+                        <span className="text-xs" style={{ color: '#777' }}>kcal</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs" style={{ color: '#777' }}>RPE</span>
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min={1}
+                          max={10}
+                          defaultValue={bloc.rpe || ''}
+                          onBlur={(e) => updateCardio(bloc.id, 'rpe', e.target.value)}
+                          style={{ ...editInputStyle, width: 45, padding: '6px 8px' }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-sm font-medium" style={{ color: '#f0f0f0' }}>
+                      {CARDIO_LABELS[bloc.type_cardio] || bloc.type_cardio}
+                    </p>
+                    <p className="text-xs mt-1" style={{ color: '#777' }}>
+                      {bloc.duree_minutes ? `${bloc.duree_minutes} min` : ''}
+                      {bloc.distance_km ? ` · ${bloc.distance_km} km` : ''}
+                      {bloc.calories ? ` · ${bloc.calories} kcal` : ''}
+                      {bloc.frequence_cardiaque ? ` · ${bloc.frequence_cardiaque} bpm` : ''}
+                      {bloc.rpe ? ` · RPE ${bloc.rpe}` : ''}
+                    </p>
+                  </>
+                )}
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* ── SECTION EXERCICES ── */}
+      {/* ══ SECTION EXERCICES ══ */}
       {groups.length > 0 && (
         <div className="mb-6">
           <p className="text-xs font-medium uppercase tracking-wider mb-2" style={{ color: '#777' }}>
@@ -377,17 +839,16 @@ export default function SeanceDetailPage() {
                   className="rounded-xl px-4 py-3"
                   style={{
                     background: 'rgba(255,255,255,0.04)',
-                    border: groupHasPR
-                      ? '1px solid rgba(34,197,94,0.25)'
-                      : '1px solid rgba(255,255,255,0.08)',
+                    border: isEditing
+                      ? '1px dashed rgba(249,115,22,0.3)'
+                      : groupHasPR
+                        ? '1px solid rgba(34,197,94,0.25)'
+                        : '1px solid rgba(255,255,255,0.08)',
                   }}
                 >
-                  {/* Nom exercice */}
                   <p className="text-sm font-semibold mb-1.5" style={{ color: '#f0f0f0' }}>
                     {group.nom}
                   </p>
-
-                  {/* Badges catégorie + groupe musculaire */}
                   <div className="flex items-center gap-2 mb-2 flex-wrap">
                     {group.categorie && (
                       <Badge
@@ -407,21 +868,59 @@ export default function SeanceDetailPage() {
                     )}
                   </div>
 
-                  {/* Tableau des séries */}
+                  {/* Séries */}
                   <div className="mt-2">
-                    {/* En-tête du tableau */}
-                    <div
-                      className="flex items-center text-[10px] uppercase tracking-wider pb-1 mb-1"
-                      style={{ color: '#555', borderBottom: '1px solid rgba(255,255,255,0.06)' }}
-                    >
-                      <span className="w-12">Série</span>
-                      <span className="w-14">Reps</span>
-                      <span className="flex-1">Poids</span>
-                    </div>
+                    {!isEditing && (
+                      <div
+                        className="flex items-center text-[10px] uppercase tracking-wider pb-1 mb-1"
+                        style={{ color: '#555', borderBottom: '1px solid rgba(255,255,255,0.06)' }}
+                      >
+                        <span className="w-12">Série</span>
+                        <span className="w-14">Reps</span>
+                        <span className="flex-1">Poids</span>
+                      </div>
+                    )}
 
-                    {/* Lignes des séries */}
                     {group.series.map((serie) => {
                       const serieIsPR = isPR(serie)
+
+                      if (isEditing) {
+                        return (
+                          <div key={serie.id} className="flex items-center gap-2 mb-1.5">
+                            <span className="text-xs w-6 text-center" style={{ color: '#555' }}>
+                              {serie.num_serie}
+                            </span>
+                            <input
+                              type="number"
+                              inputMode="numeric"
+                              min={1}
+                              defaultValue={serie.repetitions}
+                              onBlur={(e) => updateSerie(serie.id, 'repetitions', e.target.value)}
+                              style={{ ...editInputStyle, width: 50, padding: '6px 8px', textAlign: 'center' }}
+                            />
+                            <span className="text-xs" style={{ color: '#777' }}>reps</span>
+                            <span className="text-xs" style={{ color: '#555' }}>×</span>
+                            <input
+                              type="number"
+                              inputMode="decimal"
+                              step={0.5}
+                              defaultValue={serie.poids_kg != null ? toDisplay(serie.poids_kg, unite) : ''}
+                              onBlur={(e) => updateSerie(serie.id, 'poids_kg', e.target.value)}
+                              placeholder="PDC"
+                              style={{ ...editInputStyle, width: 60, padding: '6px 8px', textAlign: 'center' }}
+                            />
+                            <span className="text-xs" style={{ color: '#777' }}>{unitLabel(unite)}</span>
+                            <button
+                              onClick={() => deleteSerie(serie.id)}
+                              className="ml-auto w-7 h-7 rounded-full flex items-center justify-center text-xs"
+                              style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444' }}
+                            >
+                              ×
+                            </button>
+                          </div>
+                        )
+                      }
+
                       return (
                         <div
                           key={serie.num_serie}
@@ -446,6 +945,17 @@ export default function SeanceDetailPage() {
                         </div>
                       )
                     })}
+
+                    {/* Bouton + Ajouter une série (mode édition) */}
+                    {isEditing && (
+                      <button
+                        onClick={() => addSerie(group.exerciceId, group.ordre)}
+                        className="mt-2 w-full py-2 text-xs font-medium rounded-lg"
+                        style={{ color: '#f97316', border: '1px dashed rgba(249,115,22,0.3)', background: 'transparent' }}
+                      >
+                        + Ajouter une série
+                      </button>
+                    )}
                   </div>
                 </div>
               )
@@ -454,8 +964,8 @@ export default function SeanceDetailPage() {
         </div>
       )}
 
-      {/* ── TEXTE BRUT (repliable) ── */}
-      {seance.texte_brut && (
+      {/* ══ TEXTE BRUT (repliable) ══ */}
+      {seance.texte_brut && !isEditing && (
         <div className="mb-6">
           <button
             onClick={() => setShowTexteBrut(!showTexteBrut)}
@@ -475,8 +985,8 @@ export default function SeanceDetailPage() {
         </div>
       )}
 
-      {/* ── SECTION COACHING IA ── */}
-      {(seance.coaching_before || seance.coaching_during || seance.coaching_after) && (
+      {/* ══ SECTION COACHING IA ══ */}
+      {!isEditing && (seance.coaching_before || seance.coaching_during || seance.coaching_after) && (
         <div className="mb-6">
           <p
             className="text-xs font-medium uppercase tracking-wider mb-3 pb-1"
@@ -485,8 +995,6 @@ export default function SeanceDetailPage() {
             🧠 Coaching IA
           </p>
           <div className="flex flex-col gap-2">
-
-            {/* Coaching Before */}
             {seance.coaching_before && (
               <div
                 className="rounded-[10px] overflow-hidden"
@@ -501,17 +1009,12 @@ export default function SeanceDetailPage() {
                   <span>{showCoachBefore ? '▾' : '▸'}</span>
                 </button>
                 {showCoachBefore && (
-                  <div
-                    className="px-3.5 pb-3 text-xs whitespace-pre-wrap leading-relaxed"
-                    style={{ color: '#c084fc' }}
-                  >
+                  <div className="px-3.5 pb-3 text-xs whitespace-pre-wrap leading-relaxed" style={{ color: '#c084fc' }}>
                     {seance.coaching_before}
                   </div>
                 )}
               </div>
             )}
-
-            {/* Coaching During */}
             {seance.coaching_during && (
               <div
                 className="rounded-[10px] overflow-hidden"
@@ -539,8 +1042,6 @@ export default function SeanceDetailPage() {
                 )}
               </div>
             )}
-
-            {/* Coaching After */}
             {seance.coaching_after && (
               <div
                 className="rounded-[10px] overflow-hidden"
@@ -555,50 +1056,271 @@ export default function SeanceDetailPage() {
                   <span>{showCoachAfter ? '▾' : '▸'}</span>
                 </button>
                 {showCoachAfter && (
-                  <div
-                    className="px-3.5 pb-3 text-xs whitespace-pre-wrap leading-relaxed"
-                    style={{ color: '#c084fc' }}
-                  >
+                  <div className="px-3.5 pb-3 text-xs whitespace-pre-wrap leading-relaxed" style={{ color: '#c084fc' }}>
                     {seance.coaching_after}
                   </div>
                 )}
               </div>
             )}
-
           </div>
         </div>
       )}
 
-      {/* ── BOUTON SAUVER COMME TEMPLATE ── */}
-      {groups.length > 0 && (
-        <button
-          onClick={handleOpenTemplateModal}
-          className="w-full py-3 mb-3 text-sm font-semibold rounded-xl transition-colors"
-          style={{
-            background: 'transparent',
-            color: '#999',
-            border: '1px solid rgba(255,255,255,0.1)',
-          }}
+      {/* ═══════════════════════════════════════ */}
+      {/* ══ SECTION AJOUTER (mode édition) ══ */}
+      {/* ═══════════════════════════════════════ */}
+      {isEditing && (
+        <div
+          className="mb-6 pt-4"
+          style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}
         >
-          📋 Sauver comme template
-        </button>
+          <p className="text-sm font-semibold mb-3" style={{ color: '#f0f0f0' }}>
+            + Ajouter à cette séance
+          </p>
+
+          {/* Onglets */}
+          <div className="flex gap-2 mb-3">
+            {[
+              { key: 'nlp', label: '✍️ Texte libre' },
+              { key: 'manual', label: '📋 Manuel' },
+              { key: 'cardio', label: '🏃 Cardio' },
+            ].map(tab => (
+              <button
+                key={tab.key}
+                onClick={() => setAddMode(addMode === tab.key ? null : tab.key)}
+                className="flex-1 py-2.5 text-xs font-medium rounded-lg transition-colors"
+                style={{
+                  background: addMode === tab.key ? '#f97316' : 'rgba(255,255,255,0.06)',
+                  color: addMode === tab.key ? '#fff' : '#999',
+                  border: addMode === tab.key ? 'none' : '1px solid rgba(255,255,255,0.1)',
+                }}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* ── Mode NLP ── */}
+          {addMode === 'nlp' && (
+            <div
+              className="rounded-xl p-4"
+              style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}
+            >
+              {!nlpResult ? (
+                <>
+                  <textarea
+                    value={nlpText}
+                    onChange={(e) => setNlpText(e.target.value)}
+                    placeholder="Ex: pompes 3x20, curl 15kg 3x12..."
+                    rows={3}
+                    style={{ ...editInputStyle, width: '100%', resize: 'none', marginBottom: 8 }}
+                  />
+                  <button
+                    onClick={handleNlpAnalyze}
+                    disabled={nlpLoading || nlpText.trim().length < 5}
+                    className="w-full py-2.5 text-sm font-semibold rounded-lg disabled:opacity-50"
+                    style={{ background: 'linear-gradient(135deg, #f97316, #dc2626)', color: '#fff' }}
+                  >
+                    {nlpLoading ? '⏳ Analyse...' : '⚡ Analyser'}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p className="text-xs font-medium mb-2" style={{ color: '#f0f0f0' }}>
+                    Résultats de l'analyse :
+                  </p>
+                  {/* Cardio trouvé */}
+                  {nlpResult.seance?.cardio?.map((c, i) => (
+                    <div key={i} className="text-xs mb-1 px-2 py-1.5 rounded-lg" style={{ background: 'rgba(59,130,246,0.1)', color: '#93c5fd' }}>
+                      🏃 {c.type} · {c.duree} min {c.calories ? `· ${c.calories} kcal` : ''}
+                    </div>
+                  ))}
+                  {/* Exercices trouvés */}
+                  {nlpResult.seance?.exercices?.map((ex, i) => (
+                    <div key={i} className="text-xs mb-1 px-2 py-1.5 rounded-lg" style={{ background: 'rgba(249,115,22,0.1)', color: '#fb923c' }}>
+                      🏋️ {ex.nom} · {ex.series?.length || 0} série(s)
+                      {ex.series?.[0]?.poids_kg ? ` · ${ex.series[0].poids_kg} kg` : ''}
+                    </div>
+                  ))}
+                  <div className="flex gap-2 mt-3">
+                    <button
+                      onClick={handleNlpConfirm}
+                      className="flex-1 py-2.5 text-sm font-semibold rounded-lg"
+                      style={{ background: 'linear-gradient(135deg, #22c55e, #16a34a)', color: '#fff' }}
+                    >
+                      ✅ Confirmer
+                    </button>
+                    <button
+                      onClick={() => { setNlpResult(null); setNlpText('') }}
+                      className="flex-1 py-2.5 text-sm font-medium rounded-lg"
+                      style={{ background: 'rgba(255,255,255,0.06)', color: '#777' }}
+                    >
+                      Annuler
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* ── Mode Manuel ── */}
+          {addMode === 'manual' && (
+            <div
+              className="rounded-xl p-4"
+              style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}
+            >
+              <select
+                value={manualExoId}
+                onChange={(e) => setManualExoId(e.target.value)}
+                style={{ ...editInputStyle, width: '100%', marginBottom: 8 }}
+              >
+                <option value="">Choisis un exercice...</option>
+                {exercicesCatalogue.map(ex => (
+                  <option key={ex.id} value={ex.id}>
+                    {ex.nom} {ex.groupe_musculaire ? `(${ex.groupe_musculaire})` : ''}
+                  </option>
+                ))}
+              </select>
+
+              <div className="flex items-center gap-3 mb-3">
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    value={manualNbSeries}
+                    onChange={(e) => setManualNbSeries(parseInt(e.target.value) || 1)}
+                    style={{ ...editInputStyle, width: 50, textAlign: 'center', padding: '6px 8px' }}
+                  />
+                  <span className="text-xs" style={{ color: '#777' }}>séries</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    value={manualReps}
+                    onChange={(e) => setManualReps(parseInt(e.target.value) || 1)}
+                    style={{ ...editInputStyle, width: 50, textAlign: 'center', padding: '6px 8px' }}
+                  />
+                  <span className="text-xs" style={{ color: '#777' }}>reps</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    step={0.5}
+                    value={manualPoids}
+                    onChange={(e) => setManualPoids(e.target.value)}
+                    placeholder="PDC"
+                    style={{ ...editInputStyle, width: 60, textAlign: 'center', padding: '6px 8px' }}
+                  />
+                  <span className="text-xs" style={{ color: '#777' }}>{unitLabel(unite)}</span>
+                </div>
+              </div>
+
+              <button
+                onClick={addManualExercice}
+                disabled={!manualExoId}
+                className="w-full py-2.5 text-sm font-semibold rounded-lg disabled:opacity-50"
+                style={{ background: 'linear-gradient(135deg, #22c55e, #16a34a)', color: '#fff' }}
+              >
+                ✅ Ajouter
+              </button>
+            </div>
+          )}
+
+          {/* ── Mode Cardio ── */}
+          {addMode === 'cardio' && (
+            <div
+              className="rounded-xl p-4"
+              style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}
+            >
+              <select
+                value={newCardioType}
+                onChange={(e) => setNewCardioType(e.target.value)}
+                style={{ ...editInputStyle, width: '100%', marginBottom: 8 }}
+              >
+                {CARDIO_TYPES.map(t => (
+                  <option key={t} value={t}>{CARDIO_LABELS[t] || t}</option>
+                ))}
+              </select>
+
+              <div className="flex items-center gap-3 mb-3">
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    value={newCardioDuree}
+                    onChange={(e) => setNewCardioDuree(e.target.value)}
+                    placeholder="20"
+                    style={{ ...editInputStyle, width: 55, textAlign: 'center', padding: '6px 8px' }}
+                  />
+                  <span className="text-xs" style={{ color: '#777' }}>min</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    value={newCardioCalories}
+                    onChange={(e) => setNewCardioCalories(e.target.value)}
+                    placeholder="cal"
+                    style={{ ...editInputStyle, width: 55, textAlign: 'center', padding: '6px 8px' }}
+                  />
+                  <span className="text-xs" style={{ color: '#777' }}>kcal</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="text-xs" style={{ color: '#777' }}>RPE</span>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    max={10}
+                    value={newCardioRpe}
+                    onChange={(e) => setNewCardioRpe(e.target.value)}
+                    style={{ ...editInputStyle, width: 45, textAlign: 'center', padding: '6px 8px' }}
+                  />
+                </div>
+              </div>
+
+              <button
+                onClick={addCardioBloc}
+                disabled={!newCardioDuree}
+                className="w-full py-2.5 text-sm font-semibold rounded-lg disabled:opacity-50"
+                style={{ background: 'linear-gradient(135deg, #22c55e, #16a34a)', color: '#fff' }}
+              >
+                ✅ Ajouter
+              </button>
+            </div>
+          )}
+        </div>
       )}
 
-      {/* ── BOUTON SUPPRIMER ── */}
-      <button
-        onClick={handleDelete}
-        disabled={deleting}
-        className="w-full py-3 text-sm font-semibold rounded-xl transition-colors disabled:opacity-50"
-        style={{
-          background: 'rgba(239,68,68,0.1)',
-          color: '#ef4444',
-          border: '1px solid rgba(239,68,68,0.2)',
-        }}
-      >
-        {deleting ? 'Suppression...' : '🗑️ Supprimer cette séance'}
-      </button>
+      {/* ══ BOUTONS BAS DE PAGE (mode lecture) ══ */}
+      {!isEditing && (
+        <>
+          {groups.length > 0 && (
+            <button
+              onClick={handleOpenTemplateModal}
+              className="w-full py-3 mb-3 text-sm font-semibold rounded-xl transition-colors"
+              style={{ background: 'transparent', color: '#999', border: '1px solid rgba(255,255,255,0.1)' }}
+            >
+              📋 Sauver comme template
+            </button>
+          )}
 
-      {/* ── MODALE SAUVER COMME TEMPLATE ── */}
+          <button
+            onClick={handleDelete}
+            disabled={deleting}
+            className="w-full py-3 text-sm font-semibold rounded-xl transition-colors disabled:opacity-50"
+            style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.2)' }}
+          >
+            {deleting ? 'Suppression...' : '🗑️ Supprimer cette séance'}
+          </button>
+        </>
+      )}
+
+      {/* ══ MODALE SAUVER COMME TEMPLATE ══ */}
       {showTemplateModal && (
         <div
           className="fixed inset-0 z-50 flex items-end justify-center"
@@ -610,19 +1332,10 @@ export default function SeanceDetailPage() {
             style={{ background: '#1a1a1a', border: '1px solid rgba(255,255,255,0.08)' }}
           >
             {templateSuccess ? (
-              // ── Écran succès ──
               <div className="text-center py-4">
                 <p className="text-lg mb-2">✅</p>
-                <p className="text-sm font-semibold mb-3" style={{ color: '#f0f0f0' }}>
-                  Template créé !
-                </p>
-                <a
-                  href="/templates"
-                  className="text-xs underline"
-                  style={{ color: '#f97316' }}
-                >
-                  Voir mes templates →
-                </a>
+                <p className="text-sm font-semibold mb-3" style={{ color: '#f0f0f0' }}>Template créé !</p>
+                <a href="/templates" className="text-xs underline" style={{ color: '#f97316' }}>Voir mes templates →</a>
                 <button
                   onClick={() => setShowTemplateModal(false)}
                   className="w-full mt-4 py-2.5 text-sm rounded-lg"
@@ -632,11 +1345,8 @@ export default function SeanceDetailPage() {
                 </button>
               </div>
             ) : (
-              // ── Formulaire ──
               <>
-                <h2 className="text-lg font-bold mb-4" style={{ color: '#f0f0f0' }}>
-                  📋 Sauver comme template
-                </h2>
+                <h2 className="text-lg font-bold mb-4" style={{ color: '#f0f0f0' }}>📋 Sauver comme template</h2>
 
                 <label className="text-xs font-medium mb-1 block" style={{ color: '#777' }}>Nom</label>
                 <input
@@ -668,17 +1378,12 @@ export default function SeanceDetailPage() {
                   ))}
                 </div>
 
-                {/* Aperçu exercices */}
                 <p className="text-xs mb-2" style={{ color: '#555' }}>
                   Exercices inclus ({[...new Set((seance.series || []).map((s) => s.exercice_id))].length}) :
                 </p>
                 <div className="flex flex-wrap gap-1.5 mb-4">
                   {groups.map((g, i) => (
-                    <span
-                      key={i}
-                      className="text-[10px] px-2 py-1 rounded-full"
-                      style={{ background: 'rgba(255,255,255,0.06)', color: '#999' }}
-                    >
+                    <span key={i} className="text-[10px] px-2 py-1 rounded-full" style={{ background: 'rgba(255,255,255,0.06)', color: '#999' }}>
                       {g.nom}
                     </span>
                   ))}
