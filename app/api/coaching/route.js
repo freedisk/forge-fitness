@@ -140,17 +140,31 @@ Retourne UNIQUEMENT le JSON, rien d'autre.`
 
   if (mode === 'after') {
     const seanceStr = JSON.stringify(seanceEnCours || {}, null, 2)
+
+    // Enrichir avec les données du bilan si disponibles
+    let bilanInfo = ''
+    if (seanceEnCours?.rpe) {
+      bilanInfo += `\nL'utilisateur a indiqué un effort ressenti (RPE) de ${seanceEnCours.rpe}/10.`
+    }
+    if (seanceEnCours?.duree) {
+      bilanInfo += `\nDurée totale de la séance : ${seanceEnCours.duree} minutes.`
+    }
+    if (seanceEnCours?.calories) {
+      bilanInfo += `\nCalories brûlées (Apple Watch) : ${seanceEnCours.calories} kcal.`
+    }
+
     return `Mode : APRÈS SÉANCE — Analyse et recommandations.
 
 Voici la séance que je viens de terminer :
 ${seanceStr}
+${bilanInfo ? '\nDonnées bilan de fin de séance :' + bilanInfo : ''}
 
 Voici mes ${N} dernières séances (hors cette séance) :
 ${historiqueResume}
 
 Profil : ${profilStr}
 
-Analyse ma séance et donne-moi des recommandations. Réponds en JSON avec cette structure :
+Analyse ma séance et donne-moi des recommandations.${bilanInfo ? ' Intègre les données du bilan (RPE, durée, calories) dans ton analyse si disponibles.' : ''} Réponds en JSON avec cette structure :
 {
   "message": "Analyse de la séance (3-5 phrases). Points forts, axes d'amélioration, comparaison avec les séances précédentes. Mentionne les PR si applicable. Suggestion pour la prochaine séance.",
   "plan": null

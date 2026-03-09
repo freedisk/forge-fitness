@@ -21,7 +21,7 @@ Deux piliers IA : saisie NLP (Haiku) + coaching 3 temps (Sonnet).
 ## Base de données (Supabase)
 6 tables : profils, exercices, seances, cardio_blocs, series, templates
 + table liaison template_exercices
-seances : ... + coaching_before TEXT, coaching_during TEXT, coaching_after TEXT
+seances : ... + coaching_before TEXT, coaching_during TEXT, coaching_after TEXT + rpe INTEGER DEFAULT NULL + calories_totales INTEGER + duree_totale INTEGER
 Catalogue exercices : ~55 exos seedés (source='catalogue', user_id NULL)
 Auto-learning : exercices inférés par IA (source='ia_infere', user_id=UUID)
 Stockage poids TOUJOURS en kg — conversion kg/lbs uniquement à l'affichage
@@ -48,6 +48,7 @@ Stockage poids TOUJOURS en kg — conversion kg/lbs uniquement à l'affichage
 - [x] Étape 7 : API Route coaching Sonnet 3 modes (before/during/after) + UI coaching violet + archivage prompts
 - [x] Étape 8 : Templates de séance — CRUD /templates, checklist guidée /seance, sauver depuis /historique
 - [x] Mini-étape : Persistance coaching IA — sauvegarde before/during/after dans seances + affichage historique (blocs violets repliables)
+- [x] Mini-étape : Écran bilan fin de séance — durée éditable + calories Apple Watch + RPE 1-10 + coaching after enrichi
 - [ ] Étape 9 : Dashboard heatmap + KPIs
 - [ ] Étape 10 : Polish + gestion erreurs IA + prod
 
@@ -57,3 +58,13 @@ Stockage poids TOUJOURS en kg — conversion kg/lbs uniquement à l'affichage
 - Affichage coaching dans détail historique /historique/[id] — blocs violets repliables
 - Sauvegarde fire-and-forget (non bloquante pour le flow principal)
 - Coaching before différé : stocké en mémoire puis persisté à la création de la séance
+
+## Bilan fin de séance
+- Écran bilan intermédiaire (état 'finishing') entre "Terminer" et coaching after
+- Durée pré-calculée (heure actuelle - heure_debut) et éditable
+- Calories optionnelles (saisie Apple Watch)
+- RPE 1-10 : pills colorées vert→rouge, sélection exclusive, optionnel
+- "Valider le bilan" → UPDATE seance (duree_totale, calories_totales, rpe) → coaching after enrichi
+- "Passer →" → sauvegarde durée auto seulement, skip le bilan
+- Coaching after enrichi : RPE/calories/durée inclus dans le prompt si disponibles
+- Affichage RPE coloré + calories dans /historique/[id] (badge conditionnel si rpe non null)

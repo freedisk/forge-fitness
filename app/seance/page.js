@@ -23,6 +23,15 @@ const CONTEXTE_COLORS = {
   mixte: { bg: 'rgba(168,85,247,0.15)', text: '#c084fc', border: 'rgba(168,85,247,0.25)' },
 }
 
+// Couleurs RPE (effort ressenti 1-10)
+const RPE_COLORS = {
+  1: '#22c55e', 2: '#22c55e',   // vert — léger
+  3: '#84cc16', 4: '#84cc16',   // vert-jaune
+  5: '#eab308', 6: '#eab308',   // jaune — modéré
+  7: '#f97316', 8: '#f97316',   // orange
+  9: '#ef4444', 10: '#ef4444',  // rouge — intense
+}
+
 // Badge générique réutilisable
 function Badge({ label, bg, text, border }) {
   return (
@@ -265,6 +274,14 @@ export default function SeancePage() {
   const [loggingExercice, setLoggingExercice] = useState(null) // exercice actuellement en train d'être logué
   const [seriesForm, setSeriesForm] = useState([]) // [{ reps, poids }]
   const [savingSeries, setSavingSeries] = useState(false)
+
+  // Bilan fin de séance (écran intermédiaire)
+  const [isFinishing, setIsFinishing] = useState(false)
+  const [bilanDuree, setBilanDuree] = useState('')
+  const [bilanCalories, setBilanCalories] = useState('')
+  const [bilanRpe, setBilanRpe] = useState(null)
+  const [dureeAuto, setDureeAuto] = useState(0)
+  const [bilanSaving, setBilanSaving] = useState(false)
 
   // ── Détecte si des données non sauvegardées sont en cours ──
   const isDirty = texteInput.trim().length > 0 || status === 'parsed'
@@ -854,87 +871,144 @@ export default function SeancePage() {
     }
   }
 
-  // ── TERMINER LA SÉANCE ──
-  async function handleFinish() {
+  // ── TERMINER LA SÉANCE → afficher écran bilan ──
+  function handleFinish() {
     if (!activeSeanceId || !heureDebut) return
 
+    // Calculer la durée auto depuis heure_debut
+    const now = new Date()
+    const [h, m] = heureDebut.split(':').map(Number)
+    const debut = new Date()
+    debut.setHours(h, m, 0, 0)
+    const dureeMinutes = Math.round((now - debut) / 60000)
+    const autoVal = dureeMinutes > 0 ? dureeMinutes : 1
+
+    setDureeAuto(autoVal)
+    setBilanDuree(String(autoVal))
+    setBilanCalories('')
+    setBilanRpe(null)
+    setBilanSaving(false)
+    setIsFinishing(true)
+  }
+
+  // ── VALIDER LE BILAN → UPDATE séance + coaching after ──
+  async function handleValidateBilan() {
+    setBilanSaving(true)
     try {
-      const now = new Date()
-      const [h, m] = heureDebut.split(':').map(Number)
-      const debut = new Date()
-      debut.setHours(h, m, 0, 0)
-      const dureeMinutes = Math.round((now - debut) / 60000)
+      const dureeVal = parseInt(bilanDuree) || dureeAuto
+      const caloriesVal = parseInt(bilanCalories) || null
+      const rpeVal = bilanRpe || null
 
       await supabase
         .from('seances')
-        .update({ duree_totale: dureeMinutes > 0 ? dureeMinutes : 1 })
+        .update({
+          duree_totale: dureeVal,
+          calories_totales: caloriesVal,
+          rpe: rpeVal,
+        })
         .eq('id', activeSeanceId)
 
-      console.log('✅ Séance terminée — durée :', dureeMinutes, 'min')
+      console.log('✅ Bilan validé — durée:', dureeVal, 'cal:', caloriesVal, 'RPE:', rpeVal)
 
-      // ── Coaching AFTER (bonus, non bloquant) ──
-      try {
-        const { profil, historique, seanceEnCours } = await loadCoachingContext()
-        if (profil) {
-          const res = await fetch('/api/coaching', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              mode: 'after',
-              profil,
-              historique,
-              seanceEnCours,
-              contexte,
-            }),
-          })
-          if (res.ok) {
-            const data = await res.json()
-            if (data.message) {
-              // Persister coaching after en DB (fire-and-forget)
-              supabase
-                .from('seances')
-                .update({ coaching_after: data.message })
-                .eq('id', activeSeanceId)
-                .then(() => console.log('✅ Coaching after persisté'))
-                .catch((e) => console.error('⚠️ Persistance coaching after échouée :', e))
+      await proceedToCoachingAfter(dureeVal, caloriesVal, rpeVal)
+    } catch (err) {
+      console.error('❌ Erreur validation bilan :', err)
+      setBilanSaving(false)
+    }
+  }
 
-              localStorage.removeItem(LS_KEY)
-              setAfterBilan(data.message)
-              setActiveSeanceId(null)
-              setActiveSeanceData([])
-              setHeureDebut(null)
-              setTexteInput('')
-              setParseResult(null)
-              setStatus('idle')
-              setContexte('maison')
-              setCoachingResult(null)
-              setTemplateChecklist(null)
-              setLoggedExercices({})
-              return
-            }
+  // ── PASSER LE BILAN → save durée auto + coaching after ──
+  async function handleSkipBilan() {
+    setBilanSaving(true)
+    try {
+      await supabase
+        .from('seances')
+        .update({ duree_totale: dureeAuto })
+        .eq('id', activeSeanceId)
+
+      console.log('✅ Bilan passé — durée auto :', dureeAuto)
+
+      await proceedToCoachingAfter(dureeAuto, null, null)
+    } catch (err) {
+      console.error('❌ Erreur skip bilan :', err)
+      setBilanSaving(false)
+    }
+  }
+
+  // ── COACHING AFTER + cleanup (commun bilan validé et passé) ──
+  async function proceedToCoachingAfter(duree, calories, rpe) {
+    // L'écran bilan reste affiché avec l'état loading pendant l'appel
+    try {
+      const { profil, historique, seanceEnCours } = await loadCoachingContext()
+      if (profil) {
+        // Enrichir le contexte séance avec les données du bilan
+        const enrichedSeance = {
+          ...seanceEnCours,
+          rpe: rpe || null,
+          calories: calories || null,
+          duree: duree,
+        }
+
+        const res = await fetch('/api/coaching', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mode: 'after',
+            profil,
+            historique,
+            seanceEnCours: enrichedSeance,
+            contexte,
+          }),
+        })
+        if (res.ok) {
+          const data = await res.json()
+          if (data.message) {
+            // Persister coaching after en DB (fire-and-forget)
+            supabase
+              .from('seances')
+              .update({ coaching_after: data.message })
+              .eq('id', activeSeanceId)
+              .then(() => console.log('✅ Coaching after persisté'))
+              .catch((e) => console.error('⚠️ Persistance coaching after échouée :', e))
+
+            localStorage.removeItem(LS_KEY)
+            setIsFinishing(false)
+            setBilanSaving(false)
+            setAfterBilan(data.message)
+            setActiveSeanceId(null)
+            setActiveSeanceData([])
+            setHeureDebut(null)
+            setTexteInput('')
+            setParseResult(null)
+            setStatus('idle')
+            setContexte('maison')
+            setCoachingResult(null)
+            setTemplateChecklist(null)
+            setLoggedExercices({})
+            return
           }
         }
-      } catch (e) {
-        console.warn('⚠️ Coaching after échoué (non bloquant) :', e)
       }
-
-      // Si coaching after échoue → redirect normal
-      localStorage.removeItem(LS_KEY)
-      setActiveSeanceId(null)
-      setActiveSeanceData([])
-      setHeureDebut(null)
-      setTexteInput('')
-      setParseResult(null)
-      setStatus('idle')
-      setContexte('maison')
-      setCoachingResult(null)
-      setTemplateChecklist(null)
-      setLoggedExercices({})
-
-      router.push('/')
-    } catch (err) {
-      console.error('❌ Erreur fin séance :', err)
+    } catch (e) {
+      console.warn('⚠️ Coaching after échoué (non bloquant) :', e)
     }
+
+    // Si coaching after échoue → redirect normal
+    setIsFinishing(false)
+    setBilanSaving(false)
+    localStorage.removeItem(LS_KEY)
+    setActiveSeanceId(null)
+    setActiveSeanceData([])
+    setHeureDebut(null)
+    setTexteInput('')
+    setParseResult(null)
+    setStatus('idle')
+    setContexte('maison')
+    setCoachingResult(null)
+    setTemplateChecklist(null)
+    setLoggedExercices({})
+
+    router.push('/')
   }
 
   // ── Fermer le bilan et rediriger ──
@@ -947,6 +1021,120 @@ export default function SeancePage() {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <p style={{ color: '#777' }}>Chargement...</p>
+      </div>
+    )
+  }
+
+  // ── ÉCRAN BILAN FIN DE SÉANCE (durée + calories + RPE) ──
+  if (isFinishing) {
+    return (
+      <div className="min-h-screen px-4 pt-8 pb-4 flex flex-col">
+        <h1 className="text-2xl font-bold mb-6" style={{ color: '#f0f0f0' }}>
+          📊 Bilan de la séance
+        </h1>
+
+        {/* Durée */}
+        <div className="mb-5">
+          <label className="text-xs font-medium mb-1.5 block" style={{ color: '#777' }}>
+            ⏱️ Durée (minutes)
+          </label>
+          <input
+            type="number"
+            value={bilanDuree}
+            onChange={(e) => setBilanDuree(e.target.value)}
+            inputMode="numeric"
+            className="w-full text-sm px-3 py-2.5 rounded-lg outline-none"
+            style={{
+              background: 'rgba(255,255,255,0.06)',
+              color: '#f0f0f0',
+              border: '1px solid rgba(255,255,255,0.1)',
+            }}
+          />
+        </div>
+
+        {/* Calories */}
+        <div className="mb-5">
+          <label className="text-xs font-medium mb-1.5 block" style={{ color: '#777' }}>
+            🔥 Calories (Apple Watch)
+          </label>
+          <input
+            type="number"
+            value={bilanCalories}
+            onChange={(e) => setBilanCalories(e.target.value)}
+            inputMode="numeric"
+            placeholder="Depuis Apple Watch"
+            className="w-full text-sm px-3 py-2.5 rounded-lg outline-none"
+            style={{
+              background: 'rgba(255,255,255,0.06)',
+              color: '#f0f0f0',
+              border: '1px solid rgba(255,255,255,0.1)',
+            }}
+          />
+        </div>
+
+        {/* RPE — pills colorées 1-10 */}
+        <div className="mb-6">
+          <label className="text-xs font-medium mb-2 block" style={{ color: '#777' }}>
+            💪 Effort ressenti (RPE)
+          </label>
+          <div className="flex flex-wrap gap-2 mb-2">
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((val) => {
+              const isSelected = bilanRpe === val
+              const color = RPE_COLORS[val]
+              return (
+                <button
+                  key={val}
+                  onClick={() => setBilanRpe(isSelected ? null : val)}
+                  disabled={bilanSaving}
+                  className="w-9 h-9 rounded-full text-sm font-bold transition-all"
+                  style={{
+                    background: isSelected ? color : 'transparent',
+                    color: isSelected ? '#fff' : '#777',
+                    border: `2px solid ${isSelected ? color : 'rgba(255,255,255,0.12)'}`,
+                    transform: isSelected ? 'scale(1.15)' : 'scale(1)',
+                  }}
+                >
+                  {val}
+                </button>
+              )
+            })}
+          </div>
+          <div className="flex justify-between px-1">
+            <span className="text-[10px]" style={{ color: '#555' }}>Léger</span>
+            <span className="text-[10px]" style={{ color: '#555' }}>Modéré</span>
+            <span className="text-[10px]" style={{ color: '#555' }}>Intense</span>
+          </div>
+        </div>
+
+        {/* Bouton Valider le bilan */}
+        <button
+          onClick={handleValidateBilan}
+          disabled={bilanSaving}
+          className="w-full py-3.5 text-sm font-bold text-white disabled:opacity-70 transition-opacity"
+          style={{
+            background: 'linear-gradient(135deg, #f97316, #dc2626)',
+            borderRadius: '10px',
+          }}
+        >
+          {bilanSaving ? (
+            <span className="flex items-center justify-center gap-2">
+              <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              Validation en cours...
+            </span>
+          ) : (
+            '✅ Valider le bilan'
+          )}
+        </button>
+
+        {/* Lien Passer */}
+        <button
+          onClick={handleSkipBilan}
+          disabled={bilanSaving}
+          className="mt-3 text-sm font-medium text-center py-2 disabled:opacity-50"
+          style={{ color: '#555' }}
+        >
+          Passer →
+        </button>
       </div>
     )
   }

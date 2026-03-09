@@ -18,6 +18,15 @@ const CARDIO_LABELS = {
   corde_a_sauter: '⏫ Corde à sauter',
 }
 
+// Couleurs RPE pour affichage badge
+const RPE_COLORS = {
+  1: '#22c55e', 2: '#22c55e',
+  3: '#84cc16', 4: '#84cc16',
+  5: '#eab308', 6: '#eab308',
+  7: '#f97316', 8: '#f97316',
+  9: '#ef4444', 10: '#ef4444',
+}
+
 // Couleurs des badges par catégorie
 const CATEGORIE_COLORS = {
   musculation: { bg: 'rgba(249,115,22,0.15)', text: '#fb923c', border: 'rgba(249,115,22,0.25)' },
@@ -300,8 +309,23 @@ export default function SeanceDetailPage() {
         <p className="text-xs mt-1" style={{ color: '#777' }}>
           {seance.contexte === 'salle' ? '🏋️ Salle' : '🏠 Maison'}
           {seance.heure_debut ? ` · Début ${seance.heure_debut}` : ''}
-          {seance.duree_totale ? ` · ${seance.duree_totale} min` : ''}
+          {seance.duree_totale ? ` · ⏱️ ${seance.duree_totale} min` : ''}
+          {seance.calories_totales ? ` · 🔥 ${seance.calories_totales} kcal` : ''}
         </p>
+        {seance.rpe && (
+          <div className="flex items-center gap-1.5 mt-1.5">
+            <span
+              className="text-[10px] px-2 py-0.5 rounded-full font-semibold"
+              style={{
+                background: `${RPE_COLORS[seance.rpe]}20`,
+                color: RPE_COLORS[seance.rpe],
+                border: `1px solid ${RPE_COLORS[seance.rpe]}40`,
+              }}
+            >
+              💪 RPE {seance.rpe}/10
+            </span>
+          </div>
+        )}
       </div>
 
       {/* ── SECTION CARDIO ── */}
