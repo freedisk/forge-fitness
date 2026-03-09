@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { toKg, toDisplay, unitLabel } from '@/utils/units'
@@ -241,7 +241,20 @@ async function saveParseResult(result, seanceId, userId) {
 // ══════════════════════════════════════════════════════════════
 // Page Séance — saisie NLP multi-passes + templates + coaching
 // ══════════════════════════════════════════════════════════════
-export default function SeancePage() {
+// Wrapper Suspense requis par Next.js 16 pour useSearchParams
+export default function SeancePageWrapper() {
+  return (
+    <Suspense fallback={
+      <div className="flex min-h-screen items-center justify-center">
+        <p style={{ color: '#777' }}>Chargement...</p>
+      </div>
+    }>
+      <SeancePage />
+    </Suspense>
+  )
+}
+
+function SeancePage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [authLoading, setAuthLoading] = useState(true)
