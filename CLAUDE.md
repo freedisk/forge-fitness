@@ -53,6 +53,7 @@ Stockage poids TOUJOURS en kg — conversion kg/lbs uniquement à l'affichage
 - [x] Étape 10 : Polish final — retry/fallback IA, animations (parsing, PR pulse, toasts), responsive iPhone (safe area, touch targets, no-zoom), edge cases (séance vide, double-clic), favicon ⚡, manifest PWA
 - [x] Page Stats : statistiques détaillées + graphiques Recharts
 - [x] Édition séance historique : modifier/supprimer séries et cardio, ajouter exercices NLP ou manuel, édition métadonnées
+- [x] Mode saisie manuel : sélecteur catalogue, formulaire séries/cardio, dernière performance, toggle NLP/Manuel mixable
 
 ## Fonctionnalités coaching IA
 - Coaching IA persisté en DB (coaching_before, coaching_during, coaching_after dans seances)
@@ -111,7 +112,17 @@ Stockage poids TOUJOURS en kg — conversion kg/lbs uniquement à l'affichage
 - Logique auto-learning partagée : utils/exercice-resolver.js (utilisé par /seance et /historique/[id])
 - Fonctions : resolveExerciceId, normalizeExerciceName, canonicalizeExerciceName, normalizeDbValue
 
+## Mode saisie manuel
+- Toggle NLP / Manuel sur /seance (onglets orange/bleu)
+- Sélecteur exercice : catalogue filtrable par groupe musculaire + recherche
+- Formulaire séries : reps + poids (conversion kg/lbs), pré-rempli depuis dernière performance
+- Formulaire cardio : durée + distance + calories + FC + RPE (optionnels)
+- Dernière performance affichée au-dessus du formulaire ("3×10 × 60kg — il y a 3j")
+- Mixable avec NLP dans la même séance (même activeSeanceId)
+- Récap séance en cours visible en permanence
+- Zéro IA, zéro coût API — INSERT direct en DB
+
 ## Statut
-✅ FORGE MVP COMPLET — 10/10 étapes + Stats + Édition séance
+✅ FORGE MVP COMPLET — 10/10 étapes + Stats + Édition séance + Mode manuel
 Production : https://forge-fitness-one.vercel.app/
 Repo : https://github.com/freedisk/forge-fitness

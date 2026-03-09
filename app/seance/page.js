@@ -233,6 +233,26 @@ function SeancePage() {
   // Confirmation séance vide
   const [showEmptyConfirm, setShowEmptyConfirm] = useState(false)
 
+  // ── Mode saisie : NLP ou Manuel ──
+  const [inputMode, setInputMode] = useState('nlp') // 'nlp' | 'manual'
+
+  // ── Mode manuel : sélecteur exercice ──
+  const [catalogue, setCatalogue] = useState([]) // tous les exercices accessibles
+  const [manualGroupeFilter, setManualGroupeFilter] = useState('tous')
+  const [manualSearch, setManualSearch] = useState('')
+  const [selectedExercice, setSelectedExercice] = useState(null) // exercice sélectionné
+  const [lastPerformance, setLastPerformance] = useState(null) // dernière perf
+  const [lastPerfLoading, setLastPerfLoading] = useState(false)
+  const [manualSeries, setManualSeries] = useState([
+    { reps: 10, poids: '' },
+    { reps: 10, poids: '' },
+    { reps: 10, poids: '' },
+  ])
+  const [manualCardioForm, setManualCardioForm] = useState({
+    duree: '', distance: '', calories: '', fc: '', rpe: '',
+  })
+  const [manualSaving, setManualSaving] = useState(false)
+
   // ── Afficher un toast temporaire ──
   function showToast(message, type = 'success') {
     setToast({ message, type })
@@ -282,6 +302,14 @@ function SeancePage() {
         .eq('user_id', session.user.id)
         .single()
       if (profil?.unite_poids) setUserUnite(profil.unite_poids)
+
+      // ── Charger le catalogue exercices (globaux + perso) ──
+      const { data: exos } = await supabase
+        .from('exercices')
+        .select('*')
+        .or(`user_id.is.null,user_id.eq.${session.user.id}`)
+        .order('nom')
+      setCatalogue(exos || [])
 
       // ── Charger les templates de l'utilisateur ──
       const { data: tpls } = await supabase
@@ -455,6 +483,304 @@ function SeancePage() {
     }))
 
     console.log('✅ Séance template démarrée :', tpl.nom)
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // ── MODE MANUEL : fonctions ──
+  // ═══════════════════════════════════════════════════════
+
+  // Labels des groupes musculaires (filtre → label affiché)
+  const GROUPE_LABELS = {
+    tous: 'Tous',
+    pectoraux: 'Pecs',
+    dos: 'Dos',
+    epaules: 'Épaules',
+    biceps: 'Biceps',
+    triceps: 'Triceps',
+    jambes: 'Jambes',
+    abdos: 'Abdos',
+    cardio: 'Cardio',
+  }
+
+  // Normaliser une chaîne pour comparaison (sans accents, minuscules)
+  function normalizeForSearch(str) {
+    if (!str) return ''
+    return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+  }
+
+  // Filtrer le catalogue par groupe musculaire + recherche
+  const filteredCatalogue = catalogue.filter((ex) => {
+    // Filtre groupe
+    if (manualGroupeFilter !== 'tous') {
+      if (manualGroupeFilter === 'cardio') {
+        if (ex.categorie !== 'cardio') return false
+      } else {
+        if (ex.groupe_musculaire !== manualGroupeFilter) return false
+      }
+    }
+    // Filtre recherche
+    if (manualSearch.trim()) {
+      const searchNorm = normalizeForSearch(manualSearch)
+      const nomNorm = normalizeForSearch(ex.nom)
+      if (!nomNorm.includes(searchNorm)) return false
+    }
+    return true
+  })
+
+  // Charger la dernière performance pour un exercice
+  async function getLastPerformance(exerciceId) {
+    setLastPerfLoading(true)
+    try {
+      // Récupérer les séances de cet utilisateur avec cet exercice
+      const { data } = await supabase
+        .from('series')
+        .select('num_serie, repetitions, poids_kg, seances!inner(date, user_id)')
+        .eq('exercice_id', exerciceId)
+        .eq('seances.user_id', userId)
+        .order('seances(date)', { ascending: false })
+        .limit(20)
+
+      if (!data || data.length === 0) {
+        setLastPerformance(null)
+        setLastPerfLoading(false)
+        return null
+      }
+
+      // Grouper par la date la plus récente
+      const lastDate = data[0].seances.date
+      const lastSeries = data
+        .filter((s) => s.seances.date === lastDate)
+        .sort((a, b) => a.num_serie - b.num_serie)
+
+      const perf = { date: lastDate, series: lastSeries }
+      setLastPerformance(perf)
+      setLastPerfLoading(false)
+      return perf
+    } catch (e) {
+      console.warn('⚠️ Erreur chargement dernière perf :', e)
+      setLastPerformance(null)
+      setLastPerfLoading(false)
+      return null
+    }
+  }
+
+  // Formater la dernière performance pour affichage
+  function formatLastPerformance(lastPerf) {
+    if (!lastPerf) return "Première fois pour cet exercice 💪"
+
+    const { series, date } = lastPerf
+    const daysAgo = Math.floor((new Date() - new Date(date)) / 86400000)
+    const daysLabel = daysAgo === 0 ? "aujourd'hui"
+      : daysAgo === 1 ? "hier"
+      : `il y a ${daysAgo}j`
+
+    const allSameReps = series.every((s) => s.repetitions === series[0].repetitions)
+    const poids = series[0].poids_kg
+
+    if (allSameReps && poids) {
+      return `${series.length}×${series[0].repetitions} × ${toDisplay(poids, userUnite)}${unitLabel(userUnite)} — ${daysLabel}`
+    } else if (allSameReps) {
+      return `${series.length}×${series[0].repetitions} reps — ${daysLabel}`
+    } else {
+      const repsStr = series.map((s) => s.repetitions).join(', ')
+      const poidsStr = poids ? ` × ${toDisplay(poids, userUnite)}${unitLabel(userUnite)}` : ''
+      return `${series.length} séries : ${repsStr}${poidsStr} — ${daysLabel}`
+    }
+  }
+
+  // Sélectionner un exercice dans le catalogue
+  async function handleSelectExercice(ex) {
+    setSelectedExercice(ex)
+    setManualSaving(false)
+
+    if (ex.categorie === 'cardio') {
+      // Formulaire cardio
+      setManualCardioForm({ duree: '', distance: '', calories: '', fc: '', rpe: '' })
+      setLastPerformance(null)
+    } else {
+      // Formulaire séries — charger la dernière perf
+      const perf = await getLastPerformance(ex.id)
+      if (perf && perf.series.length > 0) {
+        // Pré-remplir avec la dernière performance
+        setManualSeries(perf.series.map((s) => ({
+          reps: s.repetitions,
+          poids: s.poids_kg != null ? String(toDisplay(s.poids_kg, userUnite)) : '',
+        })))
+      } else {
+        // 3 séries vides par défaut
+        setManualSeries([
+          { reps: 10, poids: '' },
+          { reps: 10, poids: '' },
+          { reps: 10, poids: '' },
+        ])
+      }
+    }
+  }
+
+  // Retour au sélecteur
+  function handleBackToSelector() {
+    setSelectedExercice(null)
+    setLastPerformance(null)
+    setManualSeries([{ reps: 10, poids: '' }, { reps: 10, poids: '' }, { reps: 10, poids: '' }])
+    setManualCardioForm({ duree: '', distance: '', calories: '', fc: '', rpe: '' })
+  }
+
+  // Ajouter une série au formulaire manuel
+  function handleAddManualSerieRow() {
+    if (manualSeries.length >= 10) return
+    const last = manualSeries[manualSeries.length - 1]
+    setManualSeries((prev) => [...prev, { reps: last?.reps || 10, poids: last?.poids || '' }])
+  }
+
+  // Retirer une série du formulaire manuel
+  function handleRemoveManualSerieRow(index) {
+    if (manualSeries.length <= 1) return
+    setManualSeries((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  // Mettre à jour une série dans le formulaire manuel
+  function updateManualSerieForm(index, field, value) {
+    setManualSeries((prev) => {
+      const next = [...prev]
+      next[index] = { ...next[index], [field]: value }
+      return next
+    })
+  }
+
+  // Créer ou réutiliser la séance active
+  async function ensureSeance() {
+    if (activeSeanceId) return activeSeanceId
+
+    const now = new Date()
+    const heure = now.toTimeString().split(' ')[0].slice(0, 5)
+
+    const { data: newSeance, error } = await supabase
+      .from('seances')
+      .insert({
+        user_id: userId,
+        date: now.toISOString().split('T')[0],
+        heure_debut: heure,
+        contexte: contexte,
+      })
+      .select('id')
+      .single()
+
+    if (error) throw new Error(`Séance : ${error.message}`)
+
+    const seanceId = newSeance.id
+    setActiveSeanceId(seanceId)
+    setHeureDebut(heure)
+
+    // Persister le coaching before en attente
+    if (pendingCoachingBefore) {
+      supabase.from('seances').update({ coaching_before: pendingCoachingBefore }).eq('id', seanceId)
+        .then(() => console.log('✅ Coaching before persisté (différé, manuel)'))
+        .catch((e) => console.error('⚠️ Persistance coaching before différé échouée :', e))
+      setPendingCoachingBefore(null)
+    }
+
+    localStorage.setItem(LS_KEY, JSON.stringify({ seanceId, heure, ctx: contexte }))
+    console.log('✅ Séance créée (mode manuel) :', seanceId)
+    return seanceId
+  }
+
+  // Sauvegarder un exercice muscu depuis le formulaire manuel
+  async function saveManualExercice() {
+    if (!selectedExercice || !userId) return
+    setManualSaving(true)
+
+    try {
+      const seanceId = await ensureSeance()
+
+      // Calculer l'ordre (après les exercices déjà enregistrés)
+      const { data: existingSeries } = await supabase
+        .from('series')
+        .select('ordre')
+        .eq('seance_id', seanceId)
+      const maxOrdre = (existingSeries || []).reduce((max, s) => Math.max(max, s.ordre || 0), -1)
+
+      const rows = manualSeries.map((s, i) => {
+        const poidsVal = s.poids !== '' && s.poids !== null && s.poids !== undefined ? parseFloat(s.poids) : null
+        return {
+          seance_id: seanceId,
+          exercice_id: selectedExercice.id,
+          ordre: maxOrdre + 1,
+          num_serie: i + 1,
+          repetitions: parseInt(s.reps) || 0,
+          poids_kg: poidsVal != null && !isNaN(poidsVal) ? toKg(poidsVal, userUnite) : null,
+        }
+      })
+
+      const { error } = await supabase.from('series').insert(rows)
+      if (error) throw new Error(error.message)
+
+      console.log('✅ Exercice manuel sauvegardé :', selectedExercice.nom)
+
+      // Ajouter au récap
+      setActiveSeanceData((prev) => [...prev, {
+        type: 'exercice',
+        nom: selectedExercice.nom,
+        series: rows.map((r) => ({
+          num_serie: r.num_serie,
+          repetitions: r.repetitions,
+          poids_kg: r.poids_kg,
+        })),
+      }])
+
+      showToast(`${selectedExercice.nom} ajouté ✅`)
+      handleBackToSelector()
+    } catch (err) {
+      console.error('❌ Erreur sauvegarde manuelle :', err)
+      showToast('Erreur : ' + err.message, 'error')
+    }
+    setManualSaving(false)
+  }
+
+  // Sauvegarder un cardio depuis le formulaire manuel
+  async function saveManualCardio() {
+    if (!selectedExercice || !userId) return
+    if (!manualCardioForm.duree) return
+    setManualSaving(true)
+
+    try {
+      const seanceId = await ensureSeance()
+
+      // Calculer l'ordre cardio
+      const { data: existingCardio } = await supabase
+        .from('cardio_blocs')
+        .select('ordre')
+        .eq('seance_id', seanceId)
+      const maxOrdre = (existingCardio || []).reduce((max, c) => Math.max(max, c.ordre || 0), -1)
+
+      const { error } = await supabase.from('cardio_blocs').insert({
+        seance_id: seanceId,
+        type_cardio: selectedExercice.nom.toLowerCase(),
+        duree_minutes: parseInt(manualCardioForm.duree),
+        distance_km: manualCardioForm.distance ? parseFloat(manualCardioForm.distance) : null,
+        calories: manualCardioForm.calories ? parseInt(manualCardioForm.calories) : null,
+        frequence_cardiaque: manualCardioForm.fc ? parseInt(manualCardioForm.fc) : null,
+        rpe: manualCardioForm.rpe ? parseInt(manualCardioForm.rpe) : null,
+        ordre: maxOrdre + 1,
+      })
+
+      if (error) throw new Error(error.message)
+
+      console.log('✅ Cardio manuel sauvegardé :', selectedExercice.nom)
+
+      // Ajouter au récap
+      setActiveSeanceData((prev) => [...prev, {
+        type: 'cardio',
+        nom: selectedExercice.nom,
+        duree: parseInt(manualCardioForm.duree),
+      }])
+
+      showToast(`${selectedExercice.nom} ajouté ✅`)
+      handleBackToSelector()
+    } catch (err) {
+      console.error('❌ Erreur sauvegarde cardio manuel :', err)
+      showToast('Erreur : ' + err.message, 'error')
+    }
+    setManualSaving(false)
   }
 
   // ── Ouvrir le formulaire inline pour loguer un exercice du template ──
@@ -1393,8 +1719,35 @@ function SeancePage() {
         </div>
       )}
 
-      {/* ── ZONE DE SAISIE NLP (idle / loading / error) ── */}
+      {/* ── TOGGLE NLP / MANUEL (toujours visible en mode saisie) ── */}
       {isInputMode && (
+        <div className="flex gap-0 mb-4" style={{ borderRadius: '10px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
+          <button
+            onClick={() => setInputMode('nlp')}
+            className="flex-1 py-2.5 text-sm font-medium transition-all"
+            style={{
+              background: inputMode === 'nlp' ? 'rgba(249,115,22,0.15)' : 'transparent',
+              color: inputMode === 'nlp' ? '#f97316' : '#555',
+              borderRight: '1px solid rgba(255,255,255,0.1)',
+            }}
+          >
+            ✍️ Texte libre
+          </button>
+          <button
+            onClick={() => setInputMode('manual')}
+            className="flex-1 py-2.5 text-sm font-medium transition-all"
+            style={{
+              background: inputMode === 'manual' ? 'rgba(59,130,246,0.15)' : 'transparent',
+              color: inputMode === 'manual' ? '#3b82f6' : '#555',
+            }}
+          >
+            📋 Manuel
+          </button>
+        </div>
+      )}
+
+      {/* ── ZONE DE SAISIE NLP (idle / loading / error) ── */}
+      {isInputMode && inputMode === 'nlp' && (
         <div>
           <textarea
             value={texteInput}
@@ -1544,6 +1897,414 @@ function SeancePage() {
           {isActive && (
             <div className="mt-4">
               {/* Alerte confirmation séance vide */}
+              {showEmptyConfirm && (
+                <div
+                  className="rounded-[10px] px-4 py-3 mb-3 text-center"
+                  style={{ background: 'rgba(234,179,8,0.1)', border: '1px solid rgba(234,179,8,0.3)' }}
+                >
+                  <p className="text-sm mb-2" style={{ color: '#eab308' }}>
+                    Tu n'as rien enregistré. Terminer quand même ?
+                  </p>
+                  <div className="flex gap-3 justify-center">
+                    <button
+                      onClick={handleFinish}
+                      className="text-xs px-4 py-2 rounded-lg font-semibold"
+                      style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)' }}
+                    >
+                      Oui, terminer
+                    </button>
+                    <button
+                      onClick={() => setShowEmptyConfirm(false)}
+                      className="text-xs px-4 py-2 rounded-lg font-semibold"
+                      style={{ background: 'rgba(255,255,255,0.06)', color: '#999', border: '1px solid rgba(255,255,255,0.1)' }}
+                    >
+                      Annuler
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {!showEmptyConfirm && (
+                <button
+                  onClick={handleFinish}
+                  className="w-full py-3 text-sm font-semibold rounded-[10px] transition-colors"
+                  style={{ background: 'transparent', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)' }}
+                >
+                  ✅ Terminer la séance
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── ZONE DE SAISIE MANUEL ── */}
+      {isInputMode && inputMode === 'manual' && (
+        <div>
+          {!selectedExercice ? (
+            /* ── SÉLECTEUR D'EXERCICE ── */
+            <div>
+              <p className="text-sm font-semibold mb-3" style={{ color: '#3b82f6' }}>
+                📋 Ajouter un exercice
+              </p>
+
+              {/* Pills groupes musculaires */}
+              <div
+                className="flex gap-1.5 overflow-x-auto pb-2 mb-3"
+                style={{ scrollbarWidth: 'none' }}
+              >
+                {Object.entries(GROUPE_LABELS).map(([key, label]) => (
+                  <button
+                    key={key}
+                    onClick={() => setManualGroupeFilter(key)}
+                    className="flex-shrink-0 px-3 py-1.5 text-xs font-medium rounded-full transition-colors"
+                    style={{
+                      background: manualGroupeFilter === key ? 'rgba(59,130,246,0.15)' : 'rgba(255,255,255,0.04)',
+                      color: manualGroupeFilter === key ? '#3b82f6' : '#777',
+                      border: `1px solid ${manualGroupeFilter === key ? 'rgba(59,130,246,0.3)' : 'rgba(255,255,255,0.08)'}`,
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Recherche */}
+              <input
+                type="text"
+                value={manualSearch}
+                onChange={(e) => setManualSearch(e.target.value)}
+                placeholder="🔍 Rechercher un exercice..."
+                className="w-full text-sm px-3 py-2.5 rounded-lg outline-none mb-3"
+                style={{
+                  background: 'rgba(255,255,255,0.06)',
+                  color: '#f0f0f0',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  fontSize: '16px',
+                }}
+              />
+
+              {/* Liste exercices */}
+              <div
+                className="rounded-[10px] overflow-y-auto"
+                style={{
+                  maxHeight: '300px',
+                  background: 'rgba(255,255,255,0.02)',
+                  border: '1px solid rgba(255,255,255,0.06)',
+                }}
+              >
+                {filteredCatalogue.length === 0 ? (
+                  <p className="text-xs text-center py-6" style={{ color: '#555' }}>
+                    Aucun exercice trouvé
+                  </p>
+                ) : (
+                  filteredCatalogue.map((ex) => (
+                    <button
+                      key={ex.id}
+                      onClick={() => handleSelectExercice(ex)}
+                      className="w-full text-left px-3 py-2.5 flex items-center justify-between transition-colors"
+                      style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-sm font-medium truncate" style={{ color: '#f0f0f0' }}>
+                          {ex.nom}
+                        </span>
+                        {ex.source === 'ia_infere' && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-full flex-shrink-0"
+                            style={{ background: 'rgba(168,85,247,0.15)', color: '#c084fc' }}>
+                            🧠
+                          </span>
+                        )}
+                        {ex.is_custom && ex.source !== 'ia_infere' && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-full flex-shrink-0"
+                            style={{ background: 'rgba(59,130,246,0.15)', color: '#93c5fd' }}>
+                            ✏️
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[10px] flex-shrink-0 ml-2" style={{ color: '#555' }}>
+                        {ex.categorie === 'cardio' ? 'cardio' : ex.groupe_musculaire || ex.categorie || ''}
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          ) : selectedExercice.categorie === 'cardio' ? (
+            /* ── FORMULAIRE CARDIO ── */
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-sm font-semibold" style={{ color: '#3b82f6' }}>
+                  🏃 {selectedExercice.nom}
+                </p>
+                <button
+                  onClick={handleBackToSelector}
+                  className="text-xs px-2 py-1 rounded-md"
+                  style={{ color: '#777', background: 'rgba(255,255,255,0.06)' }}
+                >
+                  ← Retour
+                </button>
+              </div>
+
+              {/* Durée (obligatoire) */}
+              <div className="mb-3">
+                <label className="text-xs mb-1 block" style={{ color: '#777' }}>Durée (min) *</label>
+                <input
+                  type="number"
+                  value={manualCardioForm.duree}
+                  onChange={(e) => setManualCardioForm((f) => ({ ...f, duree: e.target.value }))}
+                  inputMode="numeric"
+                  placeholder="20"
+                  className="w-full text-sm px-3 py-2.5 rounded-lg outline-none"
+                  style={{ background: 'rgba(255,255,255,0.06)', color: '#f0f0f0', border: '1px solid rgba(255,255,255,0.1)', fontSize: '16px' }}
+                />
+              </div>
+
+              {/* Distance */}
+              <div className="mb-3">
+                <label className="text-xs mb-1 block" style={{ color: '#555' }}>Distance (km)</label>
+                <input
+                  type="number"
+                  value={manualCardioForm.distance}
+                  onChange={(e) => setManualCardioForm((f) => ({ ...f, distance: e.target.value }))}
+                  inputMode="decimal"
+                  placeholder="Optionnel"
+                  className="w-full text-sm px-3 py-2.5 rounded-lg outline-none"
+                  style={{ background: 'rgba(255,255,255,0.06)', color: '#f0f0f0', border: '1px solid rgba(255,255,255,0.1)', fontSize: '16px' }}
+                />
+              </div>
+
+              {/* Calories */}
+              <div className="mb-3">
+                <label className="text-xs mb-1 block" style={{ color: '#555' }}>Calories</label>
+                <input
+                  type="number"
+                  value={manualCardioForm.calories}
+                  onChange={(e) => setManualCardioForm((f) => ({ ...f, calories: e.target.value }))}
+                  inputMode="numeric"
+                  placeholder="Optionnel"
+                  className="w-full text-sm px-3 py-2.5 rounded-lg outline-none"
+                  style={{ background: 'rgba(255,255,255,0.06)', color: '#f0f0f0', border: '1px solid rgba(255,255,255,0.1)', fontSize: '16px' }}
+                />
+              </div>
+
+              {/* FC */}
+              <div className="mb-3">
+                <label className="text-xs mb-1 block" style={{ color: '#555' }}>FC moyenne (bpm)</label>
+                <input
+                  type="number"
+                  value={manualCardioForm.fc}
+                  onChange={(e) => setManualCardioForm((f) => ({ ...f, fc: e.target.value }))}
+                  inputMode="numeric"
+                  placeholder="Optionnel"
+                  className="w-full text-sm px-3 py-2.5 rounded-lg outline-none"
+                  style={{ background: 'rgba(255,255,255,0.06)', color: '#f0f0f0', border: '1px solid rgba(255,255,255,0.1)', fontSize: '16px' }}
+                />
+              </div>
+
+              {/* RPE */}
+              <div className="mb-4">
+                <label className="text-xs mb-1 block" style={{ color: '#555' }}>RPE (/10)</label>
+                <input
+                  type="number"
+                  value={manualCardioForm.rpe}
+                  onChange={(e) => setManualCardioForm((f) => ({ ...f, rpe: e.target.value }))}
+                  inputMode="numeric"
+                  min="1"
+                  max="10"
+                  placeholder="Optionnel"
+                  className="w-full text-sm px-3 py-2.5 rounded-lg outline-none"
+                  style={{ background: 'rgba(255,255,255,0.06)', color: '#f0f0f0', border: '1px solid rgba(255,255,255,0.1)', fontSize: '16px' }}
+                />
+              </div>
+
+              {/* Bouton enregistrer */}
+              <button
+                onClick={saveManualCardio}
+                disabled={manualSaving || !manualCardioForm.duree}
+                className="w-full py-3 text-sm font-bold text-white disabled:opacity-50 transition-opacity"
+                style={{ background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)', borderRadius: '10px' }}
+              >
+                {manualSaving ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Enregistrement...
+                  </span>
+                ) : (
+                  '✅ Enregistrer'
+                )}
+              </button>
+            </div>
+          ) : (
+            /* ── FORMULAIRE SÉRIES (exercice muscu/poids corps) ── */
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm font-semibold" style={{ color: '#3b82f6' }}>
+                  💪 {selectedExercice.nom}
+                </p>
+                <button
+                  onClick={handleBackToSelector}
+                  className="text-xs px-2 py-1 rounded-md"
+                  style={{ color: '#777', background: 'rgba(255,255,255,0.06)' }}
+                >
+                  ← Retour
+                </button>
+              </div>
+
+              {/* Dernière performance */}
+              {lastPerfLoading ? (
+                <div className="mb-3 py-2 px-3 rounded-lg" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                  <p className="text-xs" style={{ color: '#555' }}>Chargement...</p>
+                </div>
+              ) : (
+                <div
+                  className="mb-3 py-2 px-3 rounded-lg"
+                  style={{
+                    background: 'rgba(255,255,255,0.03)',
+                    borderLeft: '3px solid rgba(59,130,246,0.4)',
+                  }}
+                >
+                  <p className="text-xs italic" style={{ color: '#777' }}>
+                    {formatLastPerformance(lastPerformance)}
+                  </p>
+                </div>
+              )}
+
+              {/* En-tête colonnes */}
+              <div className="flex items-center gap-2 mb-2 text-[10px] uppercase tracking-wider" style={{ color: '#555' }}>
+                <span className="w-10">Série</span>
+                <span className="flex-1">Reps</span>
+                <span className="flex-1">Poids ({unitLabel(userUnite)})</span>
+                <span className="w-6"></span>
+              </div>
+
+              {/* Séries */}
+              {manualSeries.map((serie, i) => (
+                <div key={i} className="flex items-center gap-2 mb-1.5">
+                  <span className="w-10 text-xs text-center" style={{ color: '#777' }}>{i + 1}</span>
+                  <input
+                    type="number"
+                    value={serie.reps}
+                    onChange={(e) => updateManualSerieForm(i, 'reps', e.target.value)}
+                    className="flex-1 text-sm px-2 py-2 rounded-md outline-none text-center"
+                    style={{ background: 'rgba(255,255,255,0.06)', color: '#f0f0f0', border: '1px solid rgba(255,255,255,0.1)', fontSize: '16px', minHeight: '44px' }}
+                    inputMode="numeric"
+                    min="1"
+                  />
+                  <span className="text-xs" style={{ color: '#555' }}>×</span>
+                  <input
+                    type="number"
+                    value={serie.poids}
+                    onChange={(e) => updateManualSerieForm(i, 'poids', e.target.value)}
+                    placeholder="PDC"
+                    className="flex-1 text-sm px-2 py-2 rounded-md outline-none text-center"
+                    style={{ background: 'rgba(255,255,255,0.06)', color: '#f0f0f0', border: '1px solid rgba(255,255,255,0.1)', fontSize: '16px', minHeight: '44px' }}
+                    inputMode="decimal"
+                    min="0"
+                    step="0.5"
+                  />
+                  <span className="text-[10px]" style={{ color: '#555' }}>{unitLabel(userUnite)}</span>
+                  <button
+                    onClick={() => handleRemoveManualSerieRow(i)}
+                    disabled={manualSeries.length <= 1}
+                    className="w-6 text-xs disabled:opacity-20"
+                    style={{ color: '#ef4444' }}
+                  >×</button>
+                </div>
+              ))}
+
+              {/* Ajouter une série */}
+              {manualSeries.length < 10 && (
+                <button
+                  onClick={handleAddManualSerieRow}
+                  className="w-full text-xs py-2 mt-1 mb-3 rounded-md"
+                  style={{ color: '#777', border: '1px dashed rgba(255,255,255,0.1)' }}
+                >
+                  + Ajouter une série
+                </button>
+              )}
+
+              {/* Bouton enregistrer */}
+              <button
+                onClick={saveManualExercice}
+                disabled={manualSaving}
+                className="w-full py-3 text-sm font-bold text-white disabled:opacity-50 transition-opacity"
+                style={{ background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)', borderRadius: '10px' }}
+              >
+                {manualSaving ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Enregistrement...
+                  </span>
+                ) : (
+                  '✅ Enregistrer'
+                )}
+              </button>
+            </div>
+          )}
+
+          {/* Bouton Coaching (aussi disponible en mode manuel) */}
+          {!selectedExercice && (
+            <button
+              onClick={() => handleCoaching(isActive ? 'during' : 'before')}
+              disabled={coachingLoading}
+              className="w-full mt-3 py-3 text-sm font-semibold rounded-[10px] transition-colors disabled:opacity-50"
+              style={{
+                background: 'rgba(168,85,247,0.1)',
+                color: '#c084fc',
+                border: '1px solid rgba(168,85,247,0.2)',
+              }}
+            >
+              {coachingLoading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="inline-block w-4 h-4 border-2 border-purple-400/30 border-t-purple-400 rounded-full animate-spin" />
+                  Le coach réfléchit...
+                </span>
+              ) : isActive ? (
+                '🧠 Quoi faire ensuite ?'
+              ) : (
+                '🧠 Demander un plan au coach'
+              )}
+            </button>
+          )}
+
+          {/* Erreur coaching */}
+          {coachingError && !selectedExercice && (
+            <p className="text-xs text-center mt-2" style={{ color: '#c084fc' }}>
+              {coachingError}
+            </p>
+          )}
+
+          {/* Résultat coaching (si en mode manuel sans exercice sélectionné) */}
+          {coachingResult && !selectedExercice && (
+            <div
+              className="mt-3 rounded-xl px-4 py-4"
+              style={{ background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.2)' }}
+            >
+              {coachingResult.fallback && (
+                <span
+                  className="text-[9px] px-2 py-0.5 rounded-full font-medium mb-2 inline-block"
+                  style={{ background: 'rgba(234,179,8,0.15)', color: '#eab308', border: '1px solid rgba(234,179,8,0.25)' }}
+                >
+                  hors ligne
+                </span>
+              )}
+              <p className="text-sm leading-relaxed mb-3 whitespace-pre-wrap" style={{ color: '#e0d4f5' }}>
+                🧠 {coachingResult.message}
+              </p>
+              <button
+                onClick={() => setCoachingResult(null)}
+                className="w-full mt-2 py-2 text-xs rounded-lg"
+                style={{ color: '#8b7ab8' }}
+              >
+                Fermer
+              </button>
+            </div>
+          )}
+
+          {/* Bouton Terminer la séance (aussi en mode manuel) */}
+          {isActive && !selectedExercice && (
+            <div className="mt-4">
               {showEmptyConfirm && (
                 <div
                   className="rounded-[10px] px-4 py-3 mb-3 text-center"
