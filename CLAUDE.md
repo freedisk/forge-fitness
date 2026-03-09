@@ -49,7 +49,7 @@ Stockage poids TOUJOURS en kg — conversion kg/lbs uniquement à l'affichage
 - [x] Étape 8 : Templates de séance — CRUD /templates, checklist guidée /seance, sauver depuis /historique
 - [x] Mini-étape : Persistance coaching IA — sauvegarde before/during/after dans seances + affichage historique (blocs violets repliables)
 - [x] Mini-étape : Écran bilan fin de séance — durée éditable + calories Apple Watch + RPE 1-10 + coaching after enrichi
-- [ ] Étape 9 : Dashboard heatmap + KPIs
+- [x] Étape 9 : Dashboard Home — KPIs + heatmap 12 semaines + CTA + dernière séance
 - [ ] Étape 10 : Polish + gestion erreurs IA + prod
 
 ## Fonctionnalités coaching IA
@@ -68,3 +68,12 @@ Stockage poids TOUJOURS en kg — conversion kg/lbs uniquement à l'affichage
 - "Passer →" → sauvegarde durée auto seulement, skip le bilan
 - Coaching after enrichi : RPE/calories/durée inclus dans le prompt si disponibles
 - Affichage RPE coloré + calories dans /historique/[id] (badge conditionnel si rpe non null)
+
+## Dashboard Home (Étape 9)
+- 4 KPIs : streak (jours consécutifs), calories semaine, PR du mois, séances/semaine moyenne
+- Heatmap 12 semaines style GitHub (CSS grid, niveaux orange)
+- CTA "Commencer la séance" → /seance
+- Résumé dernière séance avec lien détail
+- Gestion états : loading skeleton, vide, erreur
+- Calculs côté JS (streak, calories SUM, PR via MAX comparaison, moyenne séances)
+- Couleurs KPI : Streak=#f97316, Calories=#eab308, PR=#22c55e, Séances=#3b82f6
