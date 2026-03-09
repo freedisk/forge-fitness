@@ -437,7 +437,7 @@ export default function SeanceDetailPage() {
                           </span>
                           {serieIsPR && (
                             <span
-                              className="text-[10px] px-1.5 py-0.5 rounded-full font-medium"
+                              className="pr-badge text-[10px] px-1.5 py-0.5 rounded-full font-medium"
                               style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e' }}
                             >
                               🏆 PR

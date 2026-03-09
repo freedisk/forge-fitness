@@ -296,6 +296,18 @@ function SeancePage() {
   const [dureeAuto, setDureeAuto] = useState(0)
   const [bilanSaving, setBilanSaving] = useState(false)
 
+  // Toast notifications
+  const [toast, setToast] = useState(null) // { message, type: 'success'|'error' }
+
+  // Confirmation séance vide
+  const [showEmptyConfirm, setShowEmptyConfirm] = useState(false)
+
+  // ── Afficher un toast temporaire ──
+  function showToast(message, type = 'success') {
+    setToast({ message, type })
+    setTimeout(() => setToast(null), 3000)
+  }
+
   // ── Détecte si des données non sauvegardées sont en cours ──
   const isDirty = texteInput.trim().length > 0 || status === 'parsed'
 
@@ -749,7 +761,8 @@ function SeancePage() {
 
   // ── Appel API parse-seance ──
   async function handleAnalyze() {
-    if (!texteInput.trim()) return
+    if (!texteInput.trim() || texteInput.trim().length < 5) return
+    if (status === 'loading') return // protection double-clic
 
     setStatus('loading')
     setErrorMsg('')
@@ -827,6 +840,7 @@ function SeancePage() {
       setTexteInput('')
       setParseResult(null)
       setStatus('idle')
+      showToast('Exercices ajoutés à la séance !')
 
       localStorage.setItem(LS_KEY, JSON.stringify({
         seanceId,
@@ -870,6 +884,7 @@ function SeancePage() {
       setTexteInput('')
       setParseResult(null)
       setStatus('idle')
+      showToast('Exercices ajoutés à la séance !')
 
       localStorage.setItem(LS_KEY, JSON.stringify({
         seanceId: activeSeanceId,
@@ -887,6 +902,13 @@ function SeancePage() {
   // ── TERMINER LA SÉANCE → afficher écran bilan ──
   function handleFinish() {
     if (!activeSeanceId || !heureDebut) return
+
+    // Confirmation si séance vide (aucun exercice/cardio logué)
+    if (activeSeanceData.length === 0 && !showEmptyConfirm) {
+      setShowEmptyConfirm(true)
+      return
+    }
+    setShowEmptyConfirm(false)
 
     // Calculer la durée auto depuis heure_debut
     const now = new Date()
@@ -1461,10 +1483,10 @@ function SeancePage() {
             }}
           />
 
-          {/* Bouton Analyser */}
+          {/* Bouton Analyser — désactivé si vide ou < 5 chars */}
           <button
             onClick={handleAnalyze}
-            disabled={status === 'loading' || !texteInput.trim()}
+            disabled={status === 'loading' || !texteInput.trim() || texteInput.trim().length < 5}
             className="w-full mt-3 py-3.5 text-sm font-bold text-white disabled:opacity-50 transition-opacity"
             style={{
               background: 'linear-gradient(135deg, #f97316, #dc2626)',
@@ -1529,6 +1551,15 @@ function SeancePage() {
               className="mt-3 rounded-xl px-4 py-4"
               style={{ background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.2)' }}
             >
+              {/* Badge "hors ligne" si fallback */}
+              {coachingResult.fallback && (
+                <span
+                  className="text-[9px] px-2 py-0.5 rounded-full font-medium mb-2 inline-block"
+                  style={{ background: 'rgba(234,179,8,0.15)', color: '#eab308', border: '1px solid rgba(234,179,8,0.25)' }}
+                >
+                  hors ligne
+                </span>
+              )}
               <p className="text-sm leading-relaxed mb-3 whitespace-pre-wrap" style={{ color: '#e0d4f5' }}>
                 🧠 {coachingResult.message}
               </p>
@@ -1580,13 +1611,45 @@ function SeancePage() {
 
           {/* Bouton Terminer la séance (seulement si séance active) */}
           {isActive && (
-            <button
-              onClick={handleFinish}
-              className="w-full mt-4 py-3 text-sm font-semibold rounded-[10px] transition-colors"
-              style={{ background: 'transparent', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)' }}
-            >
-              ✅ Terminer la séance
-            </button>
+            <div className="mt-4">
+              {/* Alerte confirmation séance vide */}
+              {showEmptyConfirm && (
+                <div
+                  className="rounded-[10px] px-4 py-3 mb-3 text-center"
+                  style={{ background: 'rgba(234,179,8,0.1)', border: '1px solid rgba(234,179,8,0.3)' }}
+                >
+                  <p className="text-sm mb-2" style={{ color: '#eab308' }}>
+                    Tu n'as rien enregistré. Terminer quand même ?
+                  </p>
+                  <div className="flex gap-3 justify-center">
+                    <button
+                      onClick={handleFinish}
+                      className="text-xs px-4 py-2 rounded-lg font-semibold"
+                      style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)' }}
+                    >
+                      Oui, terminer
+                    </button>
+                    <button
+                      onClick={() => setShowEmptyConfirm(false)}
+                      className="text-xs px-4 py-2 rounded-lg font-semibold"
+                      style={{ background: 'rgba(255,255,255,0.06)', color: '#999', border: '1px solid rgba(255,255,255,0.1)' }}
+                    >
+                      Annuler
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {!showEmptyConfirm && (
+                <button
+                  onClick={handleFinish}
+                  className="w-full py-3 text-sm font-semibold rounded-[10px] transition-colors"
+                  style={{ background: 'transparent', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)' }}
+                >
+                  ✅ Terminer la séance
+                </button>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -1601,7 +1664,9 @@ function SeancePage() {
           {parseResult.cardio?.length > 0 && (
             <div className="flex flex-col gap-2 mb-3">
               {parseResult.cardio.map((bloc, i) => (
-                <CardioCard key={i} bloc={bloc} />
+                <div key={i} className="parse-card" style={{ animationDelay: `${i * 0.08}s` }}>
+                  <CardioCard bloc={bloc} />
+                </div>
               ))}
             </div>
           )}
@@ -1609,7 +1674,9 @@ function SeancePage() {
           {parseResult.exercices?.length > 0 && (
             <div className="flex flex-col gap-2 mb-4">
               {parseResult.exercices.map((ex, i) => (
-                <ExerciceCard key={i} exercice={ex} />
+                <div key={i} className="parse-card" style={{ animationDelay: `${(i + (parseResult.cardio?.length || 0)) * 0.08}s` }}>
+                  <ExerciceCard exercice={ex} />
+                </div>
               ))}
             </div>
           )}
@@ -1651,6 +1718,22 @@ function SeancePage() {
               ✏️ Modifier
             </button>
           </div>
+        </div>
+      )}
+
+      {/* ── TOAST NOTIFICATION ── */}
+      {toast && (
+        <div
+          className="toast fixed left-4 right-4 bottom-24 z-50 text-center py-3 px-4 rounded-xl text-sm font-semibold"
+          style={{
+            background: toast.type === 'error'
+              ? 'rgba(239,68,68,0.9)'
+              : 'rgba(34,197,94,0.9)',
+            color: 'white',
+            backdropFilter: 'blur(8px)',
+          }}
+        >
+          {toast.type === 'error' ? '❌' : '✅'} {toast.message}
         </div>
       )}
     </div>

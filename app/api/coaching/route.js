@@ -1,9 +1,17 @@
 // API Route coaching — 3 modes via Claude Sonnet
 // before : propose un plan · during : suggère la suite · after : analyse la séance
+// Inclut retry automatique (1 retry, 1.5s) + fallback messages gracieux
 
 import { NextResponse } from 'next/server'
 
 const MODES = ['before', 'during', 'after']
+
+// Messages de repli si l'IA est injoignable
+const FALLBACK_MESSAGES = {
+  before: "Je n'ai pas pu générer de plan pour le moment. Lance ta séance comme tu le sens, tu peux me redemander pendant ! 💪",
+  during: "Désolé, je ne peux pas analyser ta séance en ce moment. Continue à ton rythme !",
+  after: "L'analyse n'est pas disponible pour le moment. Ta séance a bien été enregistrée. 🔥",
+}
 
 // ── Prompt système dynamique selon le profil ──
 function buildSystemPrompt(profil) {
@@ -185,6 +193,47 @@ function cleanJsonResponse(text) {
   return cleaned.trim()
 }
 
+// ── Appel Sonnet avec retry automatique ──
+async function callSonnetWithRetry(systemPrompt, userPrompt, maxRetries = 1) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': process.env.ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-5-20250929',
+          max_tokens: 2000,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userPrompt }],
+        }),
+      })
+
+      if (!response.ok) {
+        const errBody = await response.text()
+        console.error(`Sonnet attempt ${attempt} failed: ${response.status}`, errBody)
+        if (attempt < maxRetries) {
+          await new Promise(r => setTimeout(r, 1500))
+          continue
+        }
+        return { error: true, status: response.status }
+      }
+
+      return { error: false, data: await response.json() }
+    } catch (err) {
+      console.error(`Sonnet attempt ${attempt} network error:`, err)
+      if (attempt < maxRetries) {
+        await new Promise(r => setTimeout(r, 1500))
+        continue
+      }
+      return { error: true, network: true }
+    }
+  }
+}
+
 // ══════════════════════════════════════════════════════════════
 // POST /api/coaching — coaching IA via Sonnet (3 modes)
 // ══════════════════════════════════════════════════════════════
@@ -214,49 +263,48 @@ export async function POST(request) {
 
     console.log(`🧠 Coaching ${mode} — appel Sonnet...`)
 
-    // Appel API Anthropic
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-5-20250929',
-        max_tokens: 2000,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: userPrompt }],
-      }),
-    })
+    // Appel avec retry
+    const result = await callSonnetWithRetry(systemPrompt, userPrompt)
 
-    if (!response.ok) {
-      const errBody = await response.text()
-      console.error('❌ Erreur Anthropic :', response.status, errBody)
-      return NextResponse.json(
-        { error: `Erreur API Anthropic (${response.status})` },
-        { status: 500 }
-      )
+    // Si erreur après retry → retourner le fallback (pas d'erreur HTTP)
+    if (result.error) {
+      console.error(`❌ Coaching ${mode} — échec après retry, fallback activé`)
+      return NextResponse.json({
+        message: FALLBACK_MESSAGES[mode],
+        plan: null,
+        fallback: true,
+      })
     }
 
-    const data = await response.json()
-    const rawText = data.content?.[0]?.text || ''
-
+    const rawText = result.data.content?.[0]?.text || ''
     console.log('📝 Réponse brute Sonnet :', rawText.slice(0, 200))
 
     // Parser le JSON retourné
-    const cleanedJson = cleanJsonResponse(rawText)
-    const result = JSON.parse(cleanedJson)
+    let parsed
+    try {
+      const cleanedJson = cleanJsonResponse(rawText)
+      parsed = JSON.parse(cleanedJson)
+    } catch (jsonErr) {
+      console.error('❌ Erreur parsing JSON coaching :', jsonErr)
+      // Fallback si JSON invalide
+      return NextResponse.json({
+        message: FALLBACK_MESSAGES[mode],
+        plan: null,
+        fallback: true,
+      })
+    }
 
     console.log(`✅ Coaching ${mode} — succès`)
-
-    return NextResponse.json(result)
+    return NextResponse.json(parsed)
 
   } catch (err) {
     console.error('❌ Erreur coaching :', err)
-    return NextResponse.json(
-      { error: err.message || 'Erreur interne du coaching.' },
-      { status: 500 }
-    )
+    // Fallback ultime — jamais d'erreur HTTP pour ne pas bloquer le flow
+    const mode = 'after' // mode par défaut si inconnu
+    return NextResponse.json({
+      message: FALLBACK_MESSAGES[mode],
+      plan: null,
+      fallback: true,
+    })
   }
 }

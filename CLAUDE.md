@@ -50,7 +50,7 @@ Stockage poids TOUJOURS en kg — conversion kg/lbs uniquement à l'affichage
 - [x] Mini-étape : Persistance coaching IA — sauvegarde before/during/after dans seances + affichage historique (blocs violets repliables)
 - [x] Mini-étape : Écran bilan fin de séance — durée éditable + calories Apple Watch + RPE 1-10 + coaching after enrichi
 - [x] Étape 9 : Dashboard Home — KPIs + heatmap 12 semaines + CTA + dernière séance
-- [ ] Étape 10 : Polish + gestion erreurs IA + prod
+- [x] Étape 10 : Polish final — retry/fallback IA, animations (parsing, PR pulse, toasts), responsive iPhone (safe area, touch targets, no-zoom), edge cases (séance vide, double-clic), favicon ⚡, manifest PWA
 
 ## Fonctionnalités coaching IA
 - Coaching IA persisté en DB (coaching_before, coaching_during, coaching_after dans seances)
@@ -77,3 +77,18 @@ Stockage poids TOUJOURS en kg — conversion kg/lbs uniquement à l'affichage
 - Gestion états : loading skeleton, vide, erreur
 - Calculs côté JS (streak, calories SUM, PR via MAX comparaison, moyenne séances)
 - Couleurs KPI : Streak=#f97316, Calories=#eab308, PR=#22c55e, Séances=#3b82f6
+
+## Polish & Production (Étape 10)
+- API retry : 1 retry avec 1.5s délai sur parse-seance (Haiku) et coaching (Sonnet)
+- Coaching fallback : messages encourageants si API indisponible (ne bloque jamais le flow)
+- Animations CSS : slideUp (cards parsing), prPulse (badges PR), toastIn/toastOut (notifications)
+- prefers-reduced-motion respecté (désactive toutes les animations)
+- Responsive iPhone : font-size 16px (empêche zoom iOS), touch targets 44px min
+- Edge cases : confirmation séance vide, double-clic protection, validation texte ≥ 5 chars
+- PWA : manifest.json, favicon SVG ⚡, apple-mobile-web-app-capable
+- Toast notifications : succès (vert) / erreur (rouge), auto-dismiss 3s
+
+## Statut
+✅ FORGE MVP COMPLET — 10/10 étapes
+Production : https://forge-fitness-one.vercel.app/
+Repo : https://github.com/freedisk/forge-fitness

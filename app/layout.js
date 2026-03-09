@@ -12,10 +12,28 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// ── Metadata séparée du viewport (Next.js 16 recommandation) ──
 export const metadata = {
   title: "FORGE — Fitness Tracker",
   description: "App de tracking fitness avec IA intégrée",
-  viewport: "width=device-width, initial-scale=1, viewport-fit=cover",
+  manifest: "/manifest.json",
+  icons: {
+    icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>",
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "FORGE",
+  },
+};
+
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: "cover",
+  themeColor: "#0a0a0a",
 };
 
 // Layout principal — Server Component, fond dark, Geist font
