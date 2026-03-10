@@ -37,6 +37,7 @@ Stockage poids TOUJOURS en kg — conversion kg/lbs uniquement à l'affichage
 ## Variables d'environnement
 - NEXT_PUBLIC_SUPABASE_URL
 - NEXT_PUBLIC_SUPABASE_ANON_KEY
+- SUPABASE_SERVICE_ROLE_KEY (serveur uniquement — bypass RLS pour logging api_usage)
 - ANTHROPIC_API_KEY (serveur uniquement)
 
 ## État actuel
