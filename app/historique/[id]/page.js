@@ -50,6 +50,52 @@ const editInputStyle = {
   padding: '8px 10px',
 }
 
+// Suppression d'accents pour recherche
+function removeAccents(str) {
+  return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+}
+
+// Pills filtres groupes musculaires
+const GROUPE_PILLS = [
+  { value: 'tous', label: 'Tous' },
+  { value: 'pecs', label: 'Pecs' },
+  { value: 'dos', label: 'Dos' },
+  { value: 'epaules', label: 'Épaules' },
+  { value: 'biceps', label: 'Biceps' },
+  { value: 'triceps', label: 'Triceps' },
+  { value: 'jambes', label: 'Jambes' },
+  { value: 'abdos', label: 'Abdos' },
+  { value: 'cardio', label: 'Cardio' },
+]
+
+// Constantes pour la création d'exercice
+const CATEGORIES_CREATE = [
+  { value: 'musculation', label: 'Musculation' },
+  { value: 'poids_corps', label: 'Poids du corps' },
+  { value: 'cardio', label: 'Cardio' },
+  { value: 'mobilite', label: 'Mobilité' },
+  { value: 'autres', label: 'Autres' },
+]
+
+const GROUPES_CREATE = [
+  { value: 'pecs', label: 'Pecs' },
+  { value: 'dos', label: 'Dos' },
+  { value: 'epaules', label: 'Épaules' },
+  { value: 'biceps', label: 'Biceps' },
+  { value: 'triceps', label: 'Triceps' },
+  { value: 'jambes', label: 'Jambes' },
+  { value: 'abdos', label: 'Abdos' },
+  { value: 'full_body', label: 'Full body' },
+]
+
+const TYPES_CREATE = [
+  { value: 'barre', label: 'Barre' },
+  { value: 'halteres', label: 'Haltères' },
+  { value: 'machine', label: 'Machine' },
+  { value: 'poids_corps', label: 'Poids du corps' },
+  { value: 'cardio', label: 'Cardio' },
+]
+
 // Badge réutilisable
 function Badge({ label, bg, text, border }) {
   return (
@@ -147,6 +193,13 @@ export default function SeanceDetailPage() {
   const [newCardioCalories, setNewCardioCalories] = useState('')
   const [newCardioRpe, setNewCardioRpe] = useState('')
 
+  // ═══ CHANGEMENT D'EXERCICE ═══
+  const [changingExerciceFor, setChangingExerciceFor] = useState(null) // null | { oldExerciceId, oldExerciceNom }
+  const [groupeFilter, setGroupeFilter] = useState('tous')
+  const [searchText, setSearchText] = useState('')
+  const [isCreatingExo, setIsCreatingExo] = useState(false)
+  const [newExo, setNewExo] = useState({ nom: '', categorie: 'musculation', groupe_musculaire: 'pecs', type: 'barre' })
+
   // ── Recharger la séance complète ──
   async function reloadSeance() {
     const { data } = await supabase
@@ -232,7 +285,7 @@ export default function SeanceDetailPage() {
     async function loadCatalogue() {
       const { data } = await supabase
         .from('exercices')
-        .select('id, nom, groupe_musculaire')
+        .select('id, nom, groupe_musculaire, categorie, type')
         .or(`user_id.is.null,user_id.eq.${userId}`)
         .order('nom')
       setExercicesCatalogue(data || [])
@@ -388,6 +441,72 @@ export default function SeanceDetailPage() {
       setNewCardioCalories('')
       setNewCardioRpe('')
       setAddMode(null)
+    }
+  }
+
+  // ═══ CHANGEMENT D'EXERCICE ═══
+
+  // ── Sélection d'un exercice existant → UPDATE toutes les séries du bloc ──
+  async function handleChangeExercice(newExerciceId, newExercice) {
+    const oldExerciceId = changingExerciceFor.oldExerciceId
+
+    const { error } = await supabase
+      .from('series')
+      .update({ exercice_id: newExerciceId })
+      .eq('seance_id', seance.id)
+      .eq('exercice_id', oldExerciceId)
+
+    if (!error) {
+      // Optimistic update : mettre à jour l'état local
+      setSeance(prev => ({
+        ...prev,
+        series: prev.series.map(s =>
+          s.exercice_id === oldExerciceId
+            ? { ...s, exercice_id: newExerciceId, exercices: newExercice }
+            : s
+        )
+      }))
+      // Fermer le sélecteur
+      setChangingExerciceFor(null)
+      setGroupeFilter('tous')
+      setSearchText('')
+      setIsCreatingExo(false)
+    } else {
+      console.error('Erreur changement exercice:', error)
+    }
+  }
+
+  // ── Créer un exercice et l'utiliser comme remplacement ──
+  async function handleCreateAndUse() {
+    if (!newExo.nom.trim()) return
+
+    const normalizedCategorie = removeAccents(newExo.categorie.toLowerCase()).replace(/\s+/g, '_')
+    const normalizedGroupe = removeAccents(newExo.groupe_musculaire.toLowerCase()).replace(/\s+/g, '_')
+
+    const { data: created, error } = await supabase
+      .from('exercices')
+      .insert({
+        nom: newExo.nom.trim(),
+        categorie: normalizedCategorie,
+        groupe_musculaire: normalizedGroupe,
+        type: newExo.type,
+        is_custom: true,
+        source: 'manuel',
+        user_id: userId,
+      })
+      .select()
+      .single()
+
+    if (created) {
+      // Ajouter au catalogue local
+      setExercicesCatalogue(prev => [...prev, created])
+      // Utiliser comme remplacement
+      await handleChangeExercice(created.id, created)
+      // Reset formulaire
+      setIsCreatingExo(false)
+      setNewExo({ nom: '', categorie: 'musculation', groupe_musculaire: 'pecs', type: 'barre' })
+    } else {
+      console.error('Erreur création exercice:', error)
     }
   }
 
@@ -583,6 +702,25 @@ export default function SeanceDetailPage() {
   }
 
   const groups = groupSeriesByExercice(seance.series)
+
+  // Catalogue filtré pour le sélecteur de changement d'exercice
+  const filteredCatalogue = exercicesCatalogue.filter(ex => {
+    // Filtre groupe
+    if (groupeFilter === 'cardio') {
+      if (ex.categorie !== 'cardio') return false
+    } else if (groupeFilter !== 'tous') {
+      if (ex.groupe_musculaire !== groupeFilter) return false
+    }
+    // Filtre recherche
+    if (searchText) {
+      const search = removeAccents(searchText.toLowerCase())
+      const nom = removeAccents(ex.nom.toLowerCase())
+      if (!nom.includes(search)) return false
+    }
+    // Exclure l'exercice actuel
+    if (ex.id === changingExerciceFor?.oldExerciceId) return false
+    return true
+  })
 
   // ═══ RENDER ═══
   return (
@@ -861,9 +999,36 @@ export default function SeanceDetailPage() {
                         : '1px solid rgba(255,255,255,0.08)',
                   }}
                 >
-                  <p className="text-sm font-semibold mb-1.5" style={{ color: '#f0f0f0' }}>
-                    {group.nom}
-                  </p>
+                  {isEditing ? (
+                    <div className="flex items-center justify-between mb-1.5">
+                      <p className="text-sm font-semibold" style={{ color: changingExerciceFor?.oldExerciceId === group.exerciceId ? '#f97316' : '#f0f0f0' }}>
+                        {group.nom}
+                      </p>
+                      <button
+                        onClick={() => {
+                          if (changingExerciceFor?.oldExerciceId === group.exerciceId) {
+                            setChangingExerciceFor(null)
+                            setGroupeFilter('tous')
+                            setSearchText('')
+                            setIsCreatingExo(false)
+                          } else {
+                            setChangingExerciceFor({ oldExerciceId: group.exerciceId, oldExerciceNom: group.nom })
+                            setGroupeFilter('tous')
+                            setSearchText('')
+                            setIsCreatingExo(false)
+                          }
+                        }}
+                        className="text-xs px-2.5 py-1 rounded-lg font-medium"
+                        style={{ color: '#f97316', background: 'rgba(249,115,22,0.1)' }}
+                      >
+                        🔄 Changer
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-sm font-semibold mb-1.5" style={{ color: '#f0f0f0' }}>
+                      {group.nom}
+                    </p>
+                  )}
                   <div className="flex items-center gap-2 mb-2 flex-wrap">
                     {group.categorie && (
                       <Badge
@@ -882,6 +1047,175 @@ export default function SeanceDetailPage() {
                       />
                     )}
                   </div>
+
+                  {/* ── Sélecteur changement d'exercice (inline) ── */}
+                  {isEditing && changingExerciceFor?.oldExerciceId === group.exerciceId && (
+                    <div
+                      className="rounded-[10px] p-3 mb-3"
+                      style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.12)' }}
+                    >
+                      <p className="text-xs font-medium mb-1" style={{ color: '#f97316' }}>
+                        🔄 Changer l'exercice
+                      </p>
+                      <p className="text-[11px] mb-3" style={{ color: '#777' }}>
+                        Actuellement : {changingExerciceFor.oldExerciceNom}
+                      </p>
+
+                      {!isCreatingExo ? (
+                        <>
+                          {/* Pills groupes musculaires */}
+                          <div className="flex gap-1.5 overflow-x-auto pb-2 mb-2" style={{ WebkitOverflowScrolling: 'touch' }}>
+                            {GROUPE_PILLS.map(g => (
+                              <button
+                                key={g.value}
+                                onClick={() => setGroupeFilter(g.value)}
+                                className="text-[11px] px-2.5 py-1 rounded-full whitespace-nowrap font-medium"
+                                style={{
+                                  background: groupeFilter === g.value ? '#f97316' : 'rgba(255,255,255,0.06)',
+                                  color: groupeFilter === g.value ? '#fff' : '#777',
+                                  border: groupeFilter === g.value ? 'none' : '1px solid rgba(255,255,255,0.1)',
+                                  flexShrink: 0,
+                                }}
+                              >
+                                {g.label}
+                              </button>
+                            ))}
+                          </div>
+
+                          {/* Recherche texte */}
+                          <input
+                            type="text"
+                            value={searchText}
+                            onChange={(e) => setSearchText(e.target.value)}
+                            placeholder="🔍 Rechercher..."
+                            style={{
+                              ...editInputStyle,
+                              width: '100%',
+                              marginBottom: 8,
+                              fontSize: 16,
+                            }}
+                          />
+
+                          {/* Liste des exercices */}
+                          <div style={{ maxHeight: 350, overflowY: 'auto' }}>
+                            {filteredCatalogue.length === 0 ? (
+                              <p className="text-xs text-center py-4" style={{ color: '#555' }}>
+                                Aucun exercice trouvé
+                              </p>
+                            ) : (
+                              filteredCatalogue.map(ex => (
+                                <button
+                                  key={ex.id}
+                                  onClick={() => handleChangeExercice(ex.id, ex)}
+                                  className="w-full text-left px-3 py-3 flex items-center justify-between"
+                                  style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}
+                                >
+                                  <span className="text-xs font-medium" style={{ color: '#f0f0f0' }}>
+                                    {ex.nom}
+                                  </span>
+                                  <span className="text-[10px]" style={{ color: '#555' }}>
+                                    {ex.type || ex.categorie || ''}
+                                  </span>
+                                </button>
+                              ))
+                            )}
+                          </div>
+
+                          {/* Bouton créer un exercice */}
+                          <button
+                            onClick={() => setIsCreatingExo(true)}
+                            className="w-full mt-2 py-2.5 text-xs font-medium rounded-lg"
+                            style={{ color: '#f97316', border: '1px dashed rgba(249,115,22,0.3)', background: 'transparent' }}
+                          >
+                            + Créer un exercice
+                          </button>
+
+                          {/* Bouton annuler */}
+                          <button
+                            onClick={() => {
+                              setChangingExerciceFor(null)
+                              setGroupeFilter('tous')
+                              setSearchText('')
+                            }}
+                            className="w-full mt-2 py-2 text-xs font-medium rounded-lg"
+                            style={{ background: 'rgba(255,255,255,0.06)', color: '#777' }}
+                          >
+                            Annuler
+                          </button>
+                        </>
+                      ) : (
+                        /* ── Formulaire création d'exercice ── */
+                        <>
+                          <div className="mb-2">
+                            <label className="text-[11px] font-medium block mb-1" style={{ color: '#777' }}>Nom</label>
+                            <input
+                              type="text"
+                              value={newExo.nom}
+                              onChange={(e) => setNewExo(prev => ({ ...prev, nom: e.target.value }))}
+                              placeholder="Nom de l'exercice"
+                              style={{ ...editInputStyle, width: '100%', fontSize: 16 }}
+                            />
+                          </div>
+                          <div className="mb-2">
+                            <label className="text-[11px] font-medium block mb-1" style={{ color: '#777' }}>Catégorie</label>
+                            <select
+                              value={newExo.categorie}
+                              onChange={(e) => setNewExo(prev => ({ ...prev, categorie: e.target.value }))}
+                              style={{ ...editInputStyle, width: '100%' }}
+                            >
+                              {CATEGORIES_CREATE.map(c => (
+                                <option key={c.value} value={c.value}>{c.label}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="mb-2">
+                            <label className="text-[11px] font-medium block mb-1" style={{ color: '#777' }}>Groupe musculaire</label>
+                            <select
+                              value={newExo.groupe_musculaire}
+                              onChange={(e) => setNewExo(prev => ({ ...prev, groupe_musculaire: e.target.value }))}
+                              style={{ ...editInputStyle, width: '100%' }}
+                            >
+                              {GROUPES_CREATE.map(g => (
+                                <option key={g.value} value={g.value}>{g.label}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="mb-3">
+                            <label className="text-[11px] font-medium block mb-1" style={{ color: '#777' }}>Type</label>
+                            <select
+                              value={newExo.type}
+                              onChange={(e) => setNewExo(prev => ({ ...prev, type: e.target.value }))}
+                              style={{ ...editInputStyle, width: '100%' }}
+                            >
+                              {TYPES_CREATE.map(t => (
+                                <option key={t.value} value={t.value}>{t.label}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={handleCreateAndUse}
+                              disabled={!newExo.nom.trim()}
+                              className="flex-1 py-2.5 text-sm font-semibold rounded-lg disabled:opacity-50"
+                              style={{ background: 'linear-gradient(135deg, #f97316, #dc2626)', color: '#fff' }}
+                            >
+                              ✅ Créer et utiliser
+                            </button>
+                            <button
+                              onClick={() => {
+                                setIsCreatingExo(false)
+                                setNewExo({ nom: '', categorie: 'musculation', groupe_musculaire: 'pecs', type: 'barre' })
+                              }}
+                              className="flex-1 py-2.5 text-sm font-medium rounded-lg"
+                              style={{ background: 'rgba(255,255,255,0.06)', color: '#777' }}
+                            >
+                              Annuler
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
 
                   {/* Séries */}
                   <div className="mt-2">

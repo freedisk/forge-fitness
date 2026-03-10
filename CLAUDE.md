@@ -116,6 +116,10 @@ Stockage poids TOUJOURS en kg — conversion kg/lbs uniquement à l'affichage
 - Édition métadonnées : date, contexte (maison/salle), durée, calories, RPE
 - Logique auto-learning partagée : utils/exercice-resolver.js (utilisé par /seance et /historique/[id])
 - Fonctions : resolveExerciceId, normalizeExerciceName, canonicalizeExerciceName, normalizeDbValue
+- Changement d'exercice : bouton "Changer" sur chaque bloc en mode édition → sélecteur catalogue inline (pills groupes + recherche)
+- UPDATE toutes les séries du bloc vers le nouvel exercice_id
+- Création d'exercice à la volée si non trouvé (source='manuel', is_custom=true) — auto-learning
+- Un seul sélecteur ouvert à la fois
 
 ## Mode saisie manuel
 - Toggle NLP / Manuel sur /seance (onglets orange/bleu)
