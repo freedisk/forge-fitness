@@ -137,10 +137,11 @@ Stockage poids TOUJOURS en kg — conversion kg/lbs uniquement à l'affichage
 - Suppression séance depuis la liste /historique (bouton 🗑️, confirmation avec date, optimistic update, CASCADE)
 
 ## Catalogue exercices
-- Exercices perso (is_custom=true) éditables : nom, catégorie, groupe musculaire, type (inline, normalisation DB)
-- Suppression exercice perso avec avertissement CASCADE (compteur séries liées)
+- TOUS les exercices éditables (nom, catégorie, groupe musculaire, type) — bouton ✏️ universel
+- Exercices catalogue : ✏️ discret (opacity 0.5), pas de 🗑️ (protège les références)
+- Exercices perso (is_custom=true) : ✏️ plein + 🗑️ avec avertissement CASCADE (compteur séries liées)
 - Création exercice depuis la page catalogue (source='manuel')
-- Exercices globaux (catalogue) : lecture seule, intouchables
+- Inline edit : formulaire identique catalogue et perso (nom + 3 selects + normalisation DB)
 
 ## Notes de séance
 - Champ seances.notes exposé dans l'UI (existait déjà en DB)
