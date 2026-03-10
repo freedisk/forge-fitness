@@ -441,7 +441,7 @@ function SeancePage() {
   async function startTemplateSession(tpl, uid) {
     const now = new Date()
     const heure = now.toTimeString().split(' ')[0].slice(0, 5)
-    const ctx = tpl.contexte || 'maison'
+    const ctx = tpl.contexte || contexte
 
     const { data: seance, error } = await supabase
       .from('seances')
@@ -1768,25 +1768,32 @@ function SeancePage() {
         </div>
       )}
 
-      {/* ── SÉLECTEUR CONTEXTE (seulement si pas de séance active) ── */}
-      {!isActive && isInputMode && (
-        <div className="flex gap-2 mb-4">
+      {/* ── SÉLECTEUR CONTEXTE (idle + active, désactivé en active) ── */}
+      {isInputMode && (
+        <div className="flex gap-0 mb-4" style={{ borderRadius: 10, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
           {[
-            { value: 'maison', label: '🏠 Maison' },
-            { value: 'salle', label: '🏋️ Salle' },
-          ].map((opt) => (
-            <button
-              key={opt.value}
-              onClick={() => setContexte(opt.value)}
-              className="flex-1 py-2 text-sm font-medium rounded-[10px] transition-colors"
-              style={{
-                background: contexte === opt.value ? '#f97316' : 'rgba(255,255,255,0.07)',
-                color: contexte === opt.value ? '#fff' : '#777',
-              }}
-            >
-              {opt.label}
-            </button>
-          ))}
+            { value: 'maison', label: '🏠 Maison', activeBg: 'rgba(59,130,246,0.15)', activeColor: '#3b82f6' },
+            { value: 'salle', label: '🏋️ Salle', activeBg: 'rgba(249,115,22,0.15)', activeColor: '#f97316' },
+          ].map((opt, idx) => {
+            const selected = contexte === opt.value
+            return (
+              <button
+                key={opt.value}
+                onClick={() => !isActive && setContexte(opt.value)}
+                disabled={isActive}
+                className="flex-1 py-2 text-sm font-medium transition-colors"
+                style={{
+                  background: selected ? opt.activeBg : 'transparent',
+                  color: selected ? opt.activeColor : '#555',
+                  opacity: isActive ? 0.6 : 1,
+                  cursor: isActive ? 'default' : 'pointer',
+                  borderRight: idx === 0 ? '1px solid rgba(255,255,255,0.1)' : 'none',
+                }}
+              >
+                {opt.label}
+              </button>
+            )
+          })}
         </div>
       )}
 

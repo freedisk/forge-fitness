@@ -149,6 +149,12 @@ Stockage poids TOUJOURS en kg — conversion kg/lbs uniquement à l'affichage
 - Affichage dans détail historique (mode lecture : italic border-left, mode édition : textarea onBlur)
 - Aperçu tronqué sur les cards liste historique
 
+## Corrections mineures
+- Sélecteur contexte Maison/Salle sur /seance (toggle persistant, utilisé par ensureSeance, désactivé en séance active)
+- Type cardio éditable en mode édition (select avec 8 types + emojis)
+- Réordonnement exercices en mode édition (boutons ↑↓, échange d'ordre en DB, normalisation ordres si tous à 0)
+- Réordonnement cardio blocs en mode édition (même principe)
+
 ## Statut
 ✅ FORGE MVP COMPLET — 10/10 étapes + Stats + Édition séance + Mode manuel + Améliorations UX
 Production : https://forge-fitness-one.vercel.app/

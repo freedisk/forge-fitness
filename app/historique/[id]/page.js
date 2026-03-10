@@ -513,6 +513,114 @@ export default function SeanceDetailPage() {
     }
   }
 
+  // ═══ RÉORDONNEMENT EXERCICES ═══
+
+  // Normaliser les ordres si tous identiques (cas fréquent anciennes séances)
+  async function normalizeExerciceOrdres() {
+    const blocs = groupSeriesByExercice(seance.series)
+    const allSameOrdre = blocs.length > 1 && blocs.every(b => b.ordre === blocs[0].ordre)
+    if (!allSameOrdre) return
+
+    for (let i = 0; i < blocs.length; i++) {
+      await supabase
+        .from('series')
+        .update({ ordre: i })
+        .eq('seance_id', seance.id)
+        .eq('exercice_id', blocs[i].exerciceId)
+    }
+
+    setSeance(prev => ({
+      ...prev,
+      series: prev.series.map(s => {
+        const blocIndex = blocs.findIndex(b => b.exerciceId === s.exercice_id)
+        return { ...s, ordre: blocIndex }
+      })
+    }))
+  }
+
+  async function handleMoveExercice(exerciceId, direction) {
+    // Normaliser d'abord si nécessaire
+    let blocs = groupSeriesByExercice(seance.series)
+    const allSameOrdre = blocs.length > 1 && blocs.every(b => b.ordre === blocs[0].ordre)
+    if (allSameOrdre) {
+      await normalizeExerciceOrdres()
+      // Recharger les blocs après normalisation
+      const { data } = await supabase
+        .from('seances')
+        .select('*, cardio_blocs(*), series(*, exercices(nom, categorie, groupe_musculaire))')
+        .eq('id', seance.id)
+        .single()
+      if (data) {
+        setSeance(data)
+        blocs = groupSeriesByExercice(data.series)
+      }
+    }
+
+    const currentIndex = blocs.findIndex(b => b.exerciceId === exerciceId)
+    const targetIndex = currentIndex + direction
+    if (targetIndex < 0 || targetIndex >= blocs.length) return
+
+    const currentBloc = blocs[currentIndex]
+    const targetBloc = blocs[targetIndex]
+
+    await Promise.all([
+      supabase.from('series').update({ ordre: targetBloc.ordre }).eq('seance_id', seance.id).eq('exercice_id', currentBloc.exerciceId),
+      supabase.from('series').update({ ordre: currentBloc.ordre }).eq('seance_id', seance.id).eq('exercice_id', targetBloc.exerciceId),
+    ])
+
+    setSeance(prev => ({
+      ...prev,
+      series: prev.series.map(s => {
+        if (s.exercice_id === currentBloc.exerciceId) return { ...s, ordre: targetBloc.ordre }
+        if (s.exercice_id === targetBloc.exerciceId) return { ...s, ordre: currentBloc.ordre }
+        return s
+      })
+    }))
+  }
+
+  // ═══ RÉORDONNEMENT CARDIO ═══
+  async function handleMoveCardio(blocId, direction) {
+    const sorted = [...(seance.cardio_blocs || [])].sort((a, b) => (a.ordre || 0) - (b.ordre || 0))
+    if (sorted.length <= 1) return
+
+    // Normaliser si tous les ordres sont identiques
+    const allSameOrdre = sorted.every(b => (b.ordre || 0) === (sorted[0].ordre || 0))
+    if (allSameOrdre) {
+      for (let i = 0; i < sorted.length; i++) {
+        await supabase.from('cardio_blocs').update({ ordre: i }).eq('id', sorted[i].id)
+        sorted[i] = { ...sorted[i], ordre: i }
+      }
+      setSeance(prev => ({
+        ...prev,
+        cardio_blocs: prev.cardio_blocs.map(b => {
+          const idx = sorted.findIndex(s => s.id === b.id)
+          return { ...b, ordre: idx >= 0 ? idx : b.ordre }
+        })
+      }))
+    }
+
+    const currentIndex = sorted.findIndex(b => b.id === blocId)
+    const targetIndex = currentIndex + direction
+    if (targetIndex < 0 || targetIndex >= sorted.length) return
+
+    const currentBloc = sorted[currentIndex]
+    const targetBloc = sorted[targetIndex]
+
+    await Promise.all([
+      supabase.from('cardio_blocs').update({ ordre: targetBloc.ordre }).eq('id', currentBloc.id),
+      supabase.from('cardio_blocs').update({ ordre: currentBloc.ordre }).eq('id', targetBloc.id),
+    ])
+
+    setSeance(prev => ({
+      ...prev,
+      cardio_blocs: prev.cardio_blocs.map(b => {
+        if (b.id === currentBloc.id) return { ...b, ordre: targetBloc.ordre }
+        if (b.id === targetBloc.id) return { ...b, ordre: currentBloc.ordre }
+        return b
+      })
+    }))
+  }
+
   // ── Mettre à jour une métadonnée de la séance ──
   async function updateSeanceMeta(field, value) {
     const { error } = await supabase
@@ -935,7 +1043,7 @@ export default function SeanceDetailPage() {
             Cardio
           </p>
           <div className="flex flex-col gap-2">
-            {(seance.cardio_blocs || []).map((bloc) => (
+            {[...(seance.cardio_blocs || [])].sort((a, b) => (a.ordre || 0) - (b.ordre || 0)).map((bloc, ci, sortedCardio) => (
               <div
                 key={bloc.id}
                 className="rounded-xl px-4 py-3"
@@ -947,15 +1055,46 @@ export default function SeanceDetailPage() {
                 {isEditing ? (
                   <div>
                     <div className="flex items-center justify-between mb-2">
-                      <select
-                        defaultValue={bloc.type_cardio}
-                        onChange={(e) => updateCardio(bloc.id, 'type_cardio', e.target.value)}
-                        style={{ ...editInputStyle, flex: 1, maxWidth: 180 }}
-                      >
-                        {CARDIO_TYPES.map(t => (
-                          <option key={t} value={t}>{CARDIO_LABELS[t] || t}</option>
-                        ))}
-                      </select>
+                      <div className="flex items-center gap-1.5">
+                        {/* Boutons réordonnement ↑↓ cardio */}
+                        {sortedCardio.length > 1 && (
+                          <div className="flex flex-col gap-0.5">
+                            <button
+                              onClick={() => handleMoveCardio(bloc.id, -1)}
+                              disabled={ci === 0}
+                              className="flex items-center justify-center text-xs"
+                              style={{
+                                width: 28, height: 22, borderRadius: 4,
+                                border: '1px solid rgba(255,255,255,0.12)',
+                                color: ci === 0 ? '#333' : '#999',
+                                opacity: ci === 0 ? 0.3 : 1,
+                                cursor: ci === 0 ? 'default' : 'pointer',
+                              }}
+                            >↑</button>
+                            <button
+                              onClick={() => handleMoveCardio(bloc.id, 1)}
+                              disabled={ci === sortedCardio.length - 1}
+                              className="flex items-center justify-center text-xs"
+                              style={{
+                                width: 28, height: 22, borderRadius: 4,
+                                border: '1px solid rgba(255,255,255,0.12)',
+                                color: ci === sortedCardio.length - 1 ? '#333' : '#999',
+                                opacity: ci === sortedCardio.length - 1 ? 0.3 : 1,
+                                cursor: ci === sortedCardio.length - 1 ? 'default' : 'pointer',
+                              }}
+                            >↓</button>
+                          </div>
+                        )}
+                        <select
+                          defaultValue={bloc.type_cardio}
+                          onChange={(e) => updateCardio(bloc.id, 'type_cardio', e.target.value)}
+                          style={{ ...editInputStyle, flex: 1, maxWidth: 180 }}
+                        >
+                          {CARDIO_TYPES.map(t => (
+                            <option key={t} value={t}>{CARDIO_LABELS[t] || t}</option>
+                          ))}
+                        </select>
+                      </div>
                       <button
                         onClick={() => deleteCardio(bloc.id)}
                         className="ml-2 w-8 h-8 rounded-full flex items-center justify-center text-xs"
@@ -1046,9 +1185,38 @@ export default function SeanceDetailPage() {
                 >
                   {isEditing ? (
                     <div className="flex items-center justify-between mb-1.5">
-                      <p className="text-sm font-semibold" style={{ color: changingExerciceFor?.oldExerciceId === group.exerciceId ? '#f97316' : '#f0f0f0' }}>
-                        {group.nom}
-                      </p>
+                      <div className="flex items-center gap-1.5">
+                        {/* Boutons réordonnement ↑↓ */}
+                        <div className="flex flex-col gap-0.5">
+                          <button
+                            onClick={() => handleMoveExercice(group.exerciceId, -1)}
+                            disabled={i === 0}
+                            className="flex items-center justify-center text-xs"
+                            style={{
+                              width: 28, height: 22, borderRadius: 4,
+                              border: '1px solid rgba(255,255,255,0.12)',
+                              color: i === 0 ? '#333' : '#999',
+                              opacity: i === 0 ? 0.3 : 1,
+                              cursor: i === 0 ? 'default' : 'pointer',
+                            }}
+                          >↑</button>
+                          <button
+                            onClick={() => handleMoveExercice(group.exerciceId, 1)}
+                            disabled={i === groups.length - 1}
+                            className="flex items-center justify-center text-xs"
+                            style={{
+                              width: 28, height: 22, borderRadius: 4,
+                              border: '1px solid rgba(255,255,255,0.12)',
+                              color: i === groups.length - 1 ? '#333' : '#999',
+                              opacity: i === groups.length - 1 ? 0.3 : 1,
+                              cursor: i === groups.length - 1 ? 'default' : 'pointer',
+                            }}
+                          >↓</button>
+                        </div>
+                        <p className="text-sm font-semibold" style={{ color: changingExerciceFor?.oldExerciceId === group.exerciceId ? '#f97316' : '#f0f0f0' }}>
+                          {group.nom}
+                        </p>
+                      </div>
                       <button
                         onClick={() => {
                           if (changingExerciceFor?.oldExerciceId === group.exerciceId) {
