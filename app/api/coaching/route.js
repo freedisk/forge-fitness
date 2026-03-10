@@ -7,9 +7,10 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { estimateCost } from '@/utils/pricing'
 
+// Service role key pour bypass RLS côté serveur (anon key n'a pas auth.uid() → INSERT bloqué)
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 )
 
 const MODES = ['before', 'during', 'after']
