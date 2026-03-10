@@ -453,17 +453,17 @@ export default function ExercicesPage() {
                   </p>
                 </div>
 
-                {/* Boutons action — exercices perso uniquement */}
-                {isCustom && (
-                  <div className="flex items-center gap-1 ml-2 flex-shrink-0">
-                    <button
-                      onClick={() => { setEditingExercice({ id: ex.id, nom: ex.nom, categorie: ex.categorie || 'autres', groupe_musculaire: ex.groupe_musculaire || 'full_body', type: ex.type || 'barre' }); setIsCreating(false) }}
-                      className="flex items-center justify-center"
-                      style={{ width: 44, height: 44, color: '#777', fontSize: 18 }}
-                      title="Modifier"
-                    >
-                      ✏️
-                    </button>
+                {/* Boutons action — ✏️ sur tous, 🗑️ perso uniquement */}
+                <div className="flex items-center gap-1 ml-2 flex-shrink-0">
+                  <button
+                    onClick={() => { setEditingExercice({ id: ex.id, nom: ex.nom, categorie: ex.categorie || 'autres', groupe_musculaire: ex.groupe_musculaire || 'full_body', type: ex.type || 'barre' }); setIsCreating(false) }}
+                    className="flex items-center justify-center"
+                    style={{ width: 44, height: 44, color: '#777', fontSize: 18, opacity: isCustom ? 1 : 0.5 }}
+                    title="Modifier"
+                  >
+                    ✏️
+                  </button>
+                  {isCustom && (
                     <button
                       onClick={() => handleDeleteExercice(ex)}
                       className="flex items-center justify-center"
@@ -472,8 +472,8 @@ export default function ExercicesPage() {
                     >
                       🗑️
                     </button>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             )
           })}
