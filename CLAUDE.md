@@ -152,8 +152,8 @@ Stockage poids TOUJOURS en kg — conversion kg/lbs uniquement à l'affichage
 ## Corrections mineures
 - Sélecteur contexte Maison/Salle sur /seance (toggle persistant, utilisé par ensureSeance, désactivé en séance active)
 - Type cardio éditable en mode édition (select avec 8 types + emojis)
-- Réordonnement exercices en mode édition (boutons ↑↓, échange d'ordre en DB, normalisation ordres si tous à 0)
-- Réordonnement cardio blocs en mode édition (même principe)
+- Réordonnement exercices en mode édition (boutons ↑↓, échange d'ordre en DB, normalisation séquentielle systématique)
+- Réordonnement cardio blocs en mode édition (même principe, normalisation avant chaque échange)
 
 ## Statut
 ✅ FORGE MVP COMPLET — 10/10 étapes + Stats + Édition séance + Mode manuel + Améliorations UX
