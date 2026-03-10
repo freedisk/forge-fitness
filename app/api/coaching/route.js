@@ -163,6 +163,9 @@ Retourne UNIQUEMENT le JSON, rien d'autre.`
     if (seanceEnCours?.total_reps) {
       bilanInfo += `\nVolume de la séance : ${seanceEnCours.total_reps} répétitions totales, ${seanceEnCours.total_charge_kg || 0} kg de charge totale (tonnage).`
     }
+    if (seanceEnCours?.notes) {
+      bilanInfo += `\nNotes de l'utilisateur : "${seanceEnCours.notes}"`
+    }
 
     return `Mode : APRÈS SÉANCE — Analyse et recommandations.
 

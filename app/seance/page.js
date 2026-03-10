@@ -228,6 +228,7 @@ function SeancePage() {
   const [dureeAuto, setDureeAuto] = useState(0)
   const [bilanSaving, setBilanSaving] = useState(false)
   const [bilanVolume, setBilanVolume] = useState({ totalReps: 0, totalCharge: 0 })
+  const [bilanNotes, setBilanNotes] = useState('')
 
   // Toast notifications
   const [toast, setToast] = useState(null) // { message, type: 'success'|'error' }
@@ -1254,6 +1255,7 @@ function SeancePage() {
     setBilanDuree(String(autoVal))
     setBilanCalories('')
     setBilanRpe(null)
+    setBilanNotes('')
     setBilanSaving(false)
     setIsFinishing(true)
   }
@@ -1266,18 +1268,21 @@ function SeancePage() {
       const caloriesVal = parseInt(bilanCalories) || null
       const rpeVal = bilanRpe || null
 
+      const notesVal = bilanNotes.trim() || null
+
       await supabase
         .from('seances')
         .update({
           duree_totale: dureeVal,
           calories_totales: caloriesVal,
           rpe: rpeVal,
+          notes: notesVal,
         })
         .eq('id', activeSeanceId)
 
-      console.log('✅ Bilan validé — durée:', dureeVal, 'cal:', caloriesVal, 'RPE:', rpeVal)
+      console.log('✅ Bilan validé — durée:', dureeVal, 'cal:', caloriesVal, 'RPE:', rpeVal, 'notes:', notesVal)
 
-      await proceedToCoachingAfter(dureeVal, caloriesVal, rpeVal)
+      await proceedToCoachingAfter(dureeVal, caloriesVal, rpeVal, notesVal)
     } catch (err) {
       console.error('❌ Erreur validation bilan :', err)
       setBilanSaving(false)
@@ -1295,7 +1300,7 @@ function SeancePage() {
 
       console.log('✅ Bilan passé — durée auto :', dureeAuto)
 
-      await proceedToCoachingAfter(dureeAuto, null, null)
+      await proceedToCoachingAfter(dureeAuto, null, null, null)
     } catch (err) {
       console.error('❌ Erreur skip bilan :', err)
       setBilanSaving(false)
@@ -1303,12 +1308,12 @@ function SeancePage() {
   }
 
   // ── COACHING AFTER + cleanup (commun bilan validé et passé) ──
-  async function proceedToCoachingAfter(duree, calories, rpe) {
+  async function proceedToCoachingAfter(duree, calories, rpe, notes) {
     // L'écran bilan reste affiché avec l'état loading pendant l'appel
     try {
       const { profil, historique, seanceEnCours } = await loadCoachingContext()
       if (profil) {
-        // Enrichir le contexte séance avec les données du bilan + volume
+        // Enrichir le contexte séance avec les données du bilan + volume + notes
         const enrichedSeance = {
           ...seanceEnCours,
           rpe: rpe || null,
@@ -1316,6 +1321,7 @@ function SeancePage() {
           duree: duree,
           total_reps: bilanVolume.totalReps || null,
           total_charge_kg: bilanVolume.totalCharge || null,
+          notes: notes || null,
         }
 
         const res = await fetch('/api/coaching', {
@@ -1488,6 +1494,27 @@ function SeancePage() {
             <span className="text-[10px]" style={{ color: '#555' }}>Modéré</span>
             <span className="text-[10px]" style={{ color: '#555' }}>Intense</span>
           </div>
+        </div>
+
+        {/* Notes — optionnel */}
+        <div className="mb-6">
+          <label className="text-xs font-medium mb-1.5 block" style={{ color: '#777' }}>
+            📝 Notes (optionnel)
+          </label>
+          <textarea
+            value={bilanNotes}
+            onChange={e => setBilanNotes(e.target.value)}
+            rows={2}
+            placeholder="Ressenti, conditions, remarques..."
+            disabled={bilanSaving}
+            className="w-full text-sm px-3 py-2.5 rounded-lg outline-none resize-none"
+            style={{
+              background: 'rgba(255,255,255,0.06)',
+              color: '#f0f0f0',
+              border: '1px solid rgba(255,255,255,0.1)',
+              fontSize: 16,
+            }}
+          />
         </div>
 
         {/* Bouton Valider le bilan */}

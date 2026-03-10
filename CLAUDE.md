@@ -136,6 +136,19 @@ Stockage poids TOUJOURS en kg — conversion kg/lbs uniquement à l'affichage
 - Batch loading des dernières perfs (1 requête pour tous les exercices du template)
 - Suppression séance depuis la liste /historique (bouton 🗑️, confirmation avec date, optimistic update, CASCADE)
 
+## Catalogue exercices
+- Exercices perso (is_custom=true) éditables : nom, catégorie, groupe musculaire, type (inline, normalisation DB)
+- Suppression exercice perso avec avertissement CASCADE (compteur séries liées)
+- Création exercice depuis la page catalogue (source='manuel')
+- Exercices globaux (catalogue) : lecture seule, intouchables
+
+## Notes de séance
+- Champ seances.notes exposé dans l'UI (existait déjà en DB)
+- Saisie dans l'écran bilan fin de séance (textarea optionnel)
+- Coaching after enrichi avec les notes utilisateur
+- Affichage dans détail historique (mode lecture : italic border-left, mode édition : textarea onBlur)
+- Aperçu tronqué sur les cards liste historique
+
 ## Statut
 ✅ FORGE MVP COMPLET — 10/10 étapes + Stats + Édition séance + Mode manuel + Améliorations UX
 Production : https://forge-fitness-one.vercel.app/

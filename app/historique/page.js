@@ -294,6 +294,13 @@ export default function HistoriquePage() {
                   )
                 })()}
 
+                {/* Aperçu notes — discret, tronqué */}
+                {seance.notes && (
+                  <p className="text-[11px] mt-1 italic" style={{ color: '#777' }}>
+                    📝 &ldquo;{seance.notes.length > 50 ? seance.notes.slice(0, 50) + '...' : seance.notes}&rdquo;
+                  </p>
+                )}
+
                 {/* Bouton supprimer — en bas à droite */}
                 <div className="flex justify-end mt-1">
                   <button

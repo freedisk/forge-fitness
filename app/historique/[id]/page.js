@@ -200,6 +200,9 @@ export default function SeanceDetailPage() {
   const [isCreatingExo, setIsCreatingExo] = useState(false)
   const [newExo, setNewExo] = useState({ nom: '', categorie: 'musculation', groupe_musculaire: 'pecs', type: 'barre' })
 
+  // ═══ NOTES DE SÉANCE ═══
+  const [notesEdit, setNotesEdit] = useState('')
+
   // ── Recharger la séance complète ──
   async function reloadSeance() {
     const { data } = await supabase
@@ -873,7 +876,7 @@ export default function SeanceDetailPage() {
           {/* Bouton éditer (mode lecture) */}
           {!isEditing && (
             <button
-              onClick={() => setIsEditing(true)}
+              onClick={() => { setIsEditing(true); setNotesEdit(seance.notes || '') }}
               className="text-xs px-3 py-2 rounded-lg font-medium"
               style={{ color: '#f97316', border: '1px solid rgba(249,115,22,0.3)' }}
             >
@@ -882,6 +885,48 @@ export default function SeanceDetailPage() {
           )}
         </div>
       </div>
+
+      {/* ══ NOTES DE SÉANCE ══ */}
+      {isEditing ? (
+        <div className="mb-5">
+          <label className="text-xs font-medium mb-1.5 block" style={{ color: '#777' }}>
+            📝 Notes
+          </label>
+          <textarea
+            value={notesEdit}
+            onChange={e => setNotesEdit(e.target.value)}
+            onBlur={async () => {
+              const newNotes = notesEdit.trim() || null
+              if (newNotes === (seance.notes || null)) return
+              await supabase.from('seances').update({ notes: newNotes }).eq('id', seance.id)
+              setSeance(prev => ({ ...prev, notes: newNotes }))
+            }}
+            rows={2}
+            placeholder="Ressenti, conditions, remarques..."
+            className="w-full text-sm px-3 py-2.5 rounded-lg outline-none resize-none"
+            style={{
+              background: 'rgba(255,255,255,0.06)',
+              color: '#f0f0f0',
+              border: '1px solid rgba(255,255,255,0.15)',
+              fontSize: 16,
+            }}
+          />
+        </div>
+      ) : (
+        seance.notes && (
+          <div
+            className="mb-5 px-3 py-2.5 rounded-lg"
+            style={{
+              background: 'rgba(255,255,255,0.03)',
+              borderLeft: '3px solid #777',
+            }}
+          >
+            <p className="text-sm italic" style={{ color: '#aaa' }}>
+              📝 {seance.notes}
+            </p>
+          </div>
+        )
+      )}
 
       {/* ══ SECTION CARDIO ══ */}
       {(seance.cardio_blocs?.length > 0 || isEditing) && (
