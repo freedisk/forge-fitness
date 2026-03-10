@@ -1,6 +1,15 @@
 // API Route parse-seance — parsing NLP via Claude Haiku
 // Reçoit du texte libre, retourne un JSON structuré de la séance
 // Inclut retry automatique (1 retry, 1.5s délai) + validation structurelle
+// Logging consommation tokens dans api_usage (fire-and-forget)
+
+import { createClient } from '@supabase/supabase-js'
+import { estimateCost } from '@/utils/pricing'
+
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+)
 
 const SYSTEM_PROMPT = `Tu es un assistant spécialisé dans le parsing de séances de fitness.
 L'utilisateur décrit sa séance en langage naturel (français ou anglais).
@@ -155,6 +164,20 @@ export async function POST(request) {
         { error: "L'IA n'a pas réussi à comprendre ta séance. Reformule ou ajoute plus de détails." },
         { status: 422 }
       )
+    }
+
+    // Logging consommation tokens (fire-and-forget — n'impacte pas le flow)
+    if (data.usage && body.user_id) {
+      supabaseAdmin.from('api_usage').insert({
+        user_id: body.user_id,
+        model: 'claude-haiku-4-5-20251001',
+        model_short: 'haiku',
+        route: 'parse-seance',
+        mode: null,
+        input_tokens: data.usage.input_tokens,
+        output_tokens: data.usage.output_tokens,
+        cost_usd: estimateCost('haiku', data.usage.input_tokens, data.usage.output_tokens),
+      }).then(() => {}).catch(err => console.error('Usage log error:', err))
     }
 
     return Response.json(parsed, { status: 200 })

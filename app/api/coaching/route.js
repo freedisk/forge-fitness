@@ -1,8 +1,16 @@
 // API Route coaching — 3 modes via Claude Sonnet
 // before : propose un plan · during : suggère la suite · after : analyse la séance
 // Inclut retry automatique (1 retry, 1.5s) + fallback messages gracieux
+// Logging consommation tokens dans api_usage (fire-and-forget)
 
 import { NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
+import { estimateCost } from '@/utils/pricing'
+
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+)
 
 const MODES = ['before', 'during', 'after']
 
@@ -298,6 +306,20 @@ export async function POST(request) {
         plan: null,
         fallback: true,
       })
+    }
+
+    // Logging consommation tokens (fire-and-forget — n'impacte pas le flow)
+    if (result.data?.usage && body.user_id) {
+      supabaseAdmin.from('api_usage').insert({
+        user_id: body.user_id,
+        model: 'claude-sonnet-4-5-20250929',
+        model_short: 'sonnet',
+        route: 'coaching',
+        mode: mode,
+        input_tokens: result.data.usage.input_tokens,
+        output_tokens: result.data.usage.output_tokens,
+        cost_usd: estimateCost('sonnet', result.data.usage.input_tokens, result.data.usage.output_tokens),
+      }).then(() => {}).catch(err => console.error('Usage log error:', err))
     }
 
     console.log(`✅ Coaching ${mode} — succès`)

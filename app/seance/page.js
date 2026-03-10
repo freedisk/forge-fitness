@@ -987,6 +987,7 @@ function SeancePage() {
           historique,
           seanceEnCours,
           contexte,
+          user_id: userId,
         }),
       })
 
@@ -1067,7 +1068,7 @@ function SeancePage() {
         const res = await fetch('/api/parse-seance', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ texte }),
+          body: JSON.stringify({ texte, user_id: userId }),
         })
         const data = await res.json()
         if (!res.ok) {
@@ -1096,7 +1097,7 @@ function SeancePage() {
       const res = await fetch('/api/parse-seance', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ texte: texteInput.trim() }),
+        body: JSON.stringify({ texte: texteInput.trim(), user_id: userId }),
       })
 
       const data = await res.json()
@@ -1333,6 +1334,7 @@ function SeancePage() {
             historique,
             seanceEnCours: enrichedSeance,
             contexte,
+            user_id: userId,
           }),
         })
         if (res.ok) {

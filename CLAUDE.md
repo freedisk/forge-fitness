@@ -19,8 +19,9 @@ Deux piliers IA : saisie NLP (Haiku) + coaching 3 temps (Sonnet).
 - Bottom nav mobile (Home / Séance / Historique / Stats)
 
 ## Base de données (Supabase)
-6 tables : profils, exercices, seances, cardio_blocs, series, templates
+7 tables : profils, exercices, seances, cardio_blocs, series, templates, api_usage
 + table liaison template_exercices
+api_usage : id, created_at, user_id, model, model_short, route, mode, input_tokens, output_tokens, total_tokens (generated), cost_usd
 seances : ... + coaching_before TEXT, coaching_during TEXT, coaching_after TEXT + rpe INTEGER DEFAULT NULL + calories_totales INTEGER + duree_totale INTEGER
 Catalogue exercices : ~55 exos seedés (source='catalogue', user_id NULL)
 Auto-learning : exercices inférés par IA (source='ia_infere', user_id=UUID)
@@ -149,6 +150,14 @@ Stockage poids TOUJOURS en kg — conversion kg/lbs uniquement à l'affichage
 - Coaching after enrichi avec les notes utilisateur
 - Affichage dans détail historique (mode lecture : italic border-left, mode édition : textarea onBlur)
 - Aperçu tronqué sur les cards liste historique
+
+## Suivi consommation API
+- Table api_usage : model, route, mode, input_tokens, output_tokens, total_tokens (generated), cost_usd
+- Logging automatique fire-and-forget après chaque appel Haiku (parse-seance) et Sonnet (coaching)
+- user_id envoyé dans le body de chaque appel fetch vers les API Routes
+- Coût estimé via utils/pricing.js (tarifs approximatifs, pas une facture)
+- Affichage dans /profil : cards Haiku/Sonnet, total mois, total tout temps, détail par semaine
+- RLS : usage_own (auth.uid() = user_id)
 
 ## Corrections mineures
 - Sélecteur contexte Maison/Salle sur /seance (toggle persistant, utilisé par ensureSeance, désactivé en séance active)

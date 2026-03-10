@@ -649,7 +649,7 @@ export default function SeanceDetailPage() {
       const res = await fetch('/api/parse-seance', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ texte: nlpText.trim() }),
+        body: JSON.stringify({ texte: nlpText.trim(), user_id: userId }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Erreur parsing')
