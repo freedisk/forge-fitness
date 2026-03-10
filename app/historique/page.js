@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { toDisplay, unitLabel } from '@/utils/units'
+import { calcVolumeSeance, formatCharge } from '@/utils/volume'
 
 // Labels lisibles pour les types de cardio
 const CARDIO_LABELS = {
@@ -280,6 +281,18 @@ export default function HistoriquePage() {
                     ))}
                   </div>
                 )}
+
+                {/* Volume de séance — discret, muted */}
+                {(() => {
+                  const vol = calcVolumeSeance(seance.series || [])
+                  if (vol.totalReps === 0) return null
+                  return (
+                    <p className="text-[11px] mt-1" style={{ color: '#777' }}>
+                      {vol.totalReps} reps
+                      {vol.totalCharge > 0 && ` · ${formatCharge(vol.totalCharge, unite)}`}
+                    </p>
+                  )
+                })()}
 
                 {/* Bouton supprimer — en bas à droite */}
                 <div className="flex justify-end mt-1">

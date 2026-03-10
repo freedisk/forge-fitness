@@ -69,8 +69,13 @@ Stockage poids TOUJOURS en kg — conversion kg/lbs uniquement à l'affichage
 - RPE 1-10 : pills colorées vert→rouge, sélection exclusive, optionnel
 - "Valider le bilan" → UPDATE seance (duree_totale, calories_totales, rpe) → coaching after enrichi
 - "Passer →" → sauvegarde durée auto seulement, skip le bilan
-- Coaching after enrichi : RPE/calories/durée inclus dans le prompt si disponibles
+- Coaching after enrichi : RPE/calories/durée/volume inclus dans le prompt si disponibles
 - Affichage RPE coloré + calories dans /historique/[id] (badge conditionnel si rpe non null)
+- Volume de séance affiché : répétitions totales + charge totale (tonnage en kg/lbs/tonnes)
+- Calculé à la volée depuis les séries (pas de colonne DB) — utils/volume.js
+- Affiché : écran bilan, détail historique, cards historique
+- Tonnage = somme(reps × poids_kg) — exercices poids du corps exclus du tonnage
+- Coaching after enrichi avec le volume pour analyse contextuelle
 
 ## Dashboard Home (Étape 9)
 - 4 KPIs : streak (jours consécutifs), calories semaine, PR du mois, séances/semaine moyenne

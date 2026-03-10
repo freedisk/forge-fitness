@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { toKg, toDisplay, unitLabel } from '@/utils/units'
 import { resolveExerciceId } from '@/utils/exercice-resolver'
+import { calcVolumeSeance, formatCharge } from '@/utils/volume'
 
 // Labels lisibles pour les types de cardio
 const CARDIO_LABELS = {
@@ -679,6 +680,20 @@ export default function SeanceDetailPage() {
                 {seance.calories_totales ? ` · 🔥 ${seance.calories_totales} kcal` : ''}
               </p>
             )}
+
+            {/* Volume de séance (mode lecture) */}
+            {!isEditing && (() => {
+              const vol = calcVolumeSeance(seance.series || [])
+              if (vol.totalReps === 0) return null
+              return (
+                <p className="text-[13px] font-semibold mt-1.5" style={{ color: '#f97316' }}>
+                  💪 {vol.totalReps} reps
+                  {vol.totalCharge > 0 && (
+                    <span> · 🏋️ {formatCharge(vol.totalCharge, unite)} soulevés</span>
+                  )}
+                </p>
+              )
+            })()}
 
             {/* RPE */}
             {isEditing ? (

@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { toKg, toDisplay, unitLabel } from '@/utils/units'
 import { resolveExerciceId, normalizeDbValue } from '@/utils/exercice-resolver'
+import { calcVolumeSeance, formatCharge } from '@/utils/volume'
 
 // Clé localStorage pour persister la séance active
 const LS_KEY = 'forge_active_seance'
@@ -226,6 +227,7 @@ function SeancePage() {
   const [bilanRpe, setBilanRpe] = useState(null)
   const [dureeAuto, setDureeAuto] = useState(0)
   const [bilanSaving, setBilanSaving] = useState(false)
+  const [bilanVolume, setBilanVolume] = useState({ totalReps: 0, totalCharge: 0 })
 
   // Toast notifications
   const [toast, setToast] = useState(null) // { message, type: 'success'|'error' }
@@ -1222,7 +1224,7 @@ function SeancePage() {
   }
 
   // ── TERMINER LA SÉANCE → afficher écran bilan ──
-  function handleFinish() {
+  async function handleFinish() {
     if (!activeSeanceId || !heureDebut) return
 
     // Confirmation si séance vide (aucun exercice/cardio logué)
@@ -1239,6 +1241,14 @@ function SeancePage() {
     debut.setHours(h, m, 0, 0)
     const dureeMinutes = Math.round((now - debut) / 60000)
     const autoVal = dureeMinutes > 0 ? dureeMinutes : 1
+
+    // Charger les séries de la séance pour calculer le volume
+    const { data: seanceSeries } = await supabase
+      .from('series')
+      .select('repetitions, poids_kg')
+      .eq('seance_id', activeSeanceId)
+    const vol = calcVolumeSeance(seanceSeries || [])
+    setBilanVolume(vol)
 
     setDureeAuto(autoVal)
     setBilanDuree(String(autoVal))
@@ -1298,12 +1308,14 @@ function SeancePage() {
     try {
       const { profil, historique, seanceEnCours } = await loadCoachingContext()
       if (profil) {
-        // Enrichir le contexte séance avec les données du bilan
+        // Enrichir le contexte séance avec les données du bilan + volume
         const enrichedSeance = {
           ...seanceEnCours,
           rpe: rpe || null,
           calories: calories || null,
           duree: duree,
+          total_reps: bilanVolume.totalReps || null,
+          total_charge_kg: bilanVolume.totalCharge || null,
         }
 
         const res = await fetch('/api/coaching', {
@@ -1389,6 +1401,21 @@ function SeancePage() {
         <h1 className="text-2xl font-bold mb-6" style={{ color: '#f0f0f0' }}>
           📊 Bilan de la séance
         </h1>
+
+        {/* Volume de séance — affiché si au moins 1 rep */}
+        {bilanVolume.totalReps > 0 && (
+          <div
+            className="rounded-[10px] px-4 py-3 mb-5 text-center"
+            style={{ background: 'rgba(249,115,22,0.08)', border: '1px solid rgba(249,115,22,0.2)' }}
+          >
+            <p className="text-base font-bold" style={{ color: '#f97316' }}>
+              💪 {bilanVolume.totalReps} reps
+              {bilanVolume.totalCharge > 0 && (
+                <span> · 🏋️ {formatCharge(bilanVolume.totalCharge, userUnite)} soulevés</span>
+              )}
+            </p>
+          </div>
+        )}
 
         {/* Durée */}
         <div className="mb-5">
