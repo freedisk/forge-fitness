@@ -511,13 +511,14 @@ function SeancePage() {
   // Labels des groupes musculaires (filtre → label affiché)
   const GROUPE_LABELS = {
     tous: 'Tous',
-    pectoraux: 'Pecs',
+    pecs: 'Pecs',
     dos: 'Dos',
     epaules: 'Épaules',
     biceps: 'Biceps',
     triceps: 'Triceps',
     jambes: 'Jambes',
     abdos: 'Abdos',
+    full_body: 'Full Body',
     cardio: 'Cardio',
   }
 
@@ -1898,7 +1899,7 @@ function SeancePage() {
             value={texteInput}
             onChange={(e) => setTexteInput(e.target.value)}
             placeholder={isActive
-              ? "Ajoute d'autres exercices... ex: tractions 8 8 6, curl 15kg 3x12"
+              ? "Bien joué ! Continue ici — ex: tractions 8 8 6, curl 15kg 3x12"
               : "Décris ta séance... ex: 20 min vélo RPE 7, pompes 3x20, tractions 8 8 6, curl 15kg 3x12"
             }
             className="w-full text-sm outline-none resize-y"
@@ -1913,24 +1914,32 @@ function SeancePage() {
           />
 
           {/* Bouton Analyser — désactivé si vide ou < 5 chars */}
-          <button
-            onClick={handleAnalyze}
-            disabled={status === 'loading' || !texteInput.trim() || texteInput.trim().length < 5}
-            className="w-full mt-3 py-3.5 text-sm font-bold text-white disabled:opacity-50 transition-opacity"
-            style={{
-              background: 'linear-gradient(135deg, #f97316, #dc2626)',
-              borderRadius: '10px',
-            }}
-          >
-            {status === 'loading' ? (
-              <span className="flex items-center justify-center gap-2">
-                <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                Analyse en cours...
-              </span>
-            ) : (
-              '⚡ Analyser'
-            )}
-          </button>
+          {(() => {
+            const analyzeDisabled = status === 'loading' || !texteInput.trim() || texteInput.trim().length < 5
+            return (
+              <button
+                onClick={handleAnalyze}
+                disabled={analyzeDisabled}
+                className="w-full mt-3 py-3.5 text-sm font-bold transition-all"
+                style={{
+                  background: analyzeDisabled && status !== 'loading'
+                    ? 'rgba(255,255,255,0.08)'
+                    : 'linear-gradient(135deg, #f97316, #dc2626)',
+                  color: analyzeDisabled && status !== 'loading' ? '#555' : '#fff',
+                  borderRadius: '10px',
+                }}
+              >
+                {status === 'loading' ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Analyse en cours...
+                  </span>
+                ) : (
+                  '⚡ Analyser'
+                )}
+              </button>
+            )
+          })()}
 
           {/* Message d'erreur */}
           {status === 'error' && errorMsg && (
