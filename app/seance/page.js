@@ -248,8 +248,6 @@ function SeancePage() {
   const [lastPerfLoading, setLastPerfLoading] = useState(false)
   const [manualSeries, setManualSeries] = useState([
     { reps: 10, poids: '' },
-    { reps: 10, poids: '' },
-    { reps: 10, poids: '' },
   ])
   const [manualCardioForm, setManualCardioForm] = useState({
     duree: '', distance: '', calories: '', fc: '', rpe: '',
@@ -660,16 +658,15 @@ function SeancePage() {
       // Formulaire séries — charger la dernière perf
       const perf = await getLastPerformance(ex.id)
       if (perf && perf.series.length > 0) {
-        // Pré-remplir avec la dernière performance
-        setManualSeries(perf.series.map((s) => ({
-          reps: s.repetitions,
-          poids: s.poids_kg != null ? String(toDisplay(s.poids_kg, userUnite)) : '',
-        })))
+        // Pré-remplir uniquement la série 1 depuis la dernière perf
+        const s1 = perf.series[0]
+        setManualSeries([{
+          reps: s1.repetitions,
+          poids: s1.poids_kg != null ? String(toDisplay(s1.poids_kg, userUnite)) : '',
+        }])
       } else {
-        // 3 séries vides par défaut
+        // 1 série vide par défaut
         setManualSeries([
-          { reps: 10, poids: '' },
-          { reps: 10, poids: '' },
           { reps: 10, poids: '' },
         ])
       }
@@ -680,15 +677,26 @@ function SeancePage() {
   function handleBackToSelector() {
     setSelectedExercice(null)
     setLastPerformance(null)
-    setManualSeries([{ reps: 10, poids: '' }, { reps: 10, poids: '' }, { reps: 10, poids: '' }])
+    setManualSeries([{ reps: 10, poids: '' }])
     setManualCardioForm({ duree: '', distance: '', calories: '', fc: '', rpe: '' })
   }
 
-  // Ajouter une série au formulaire manuel
+  // Ajouter une série au formulaire manuel — pré-remplir depuis dernière perf si dispo
   function handleAddManualSerieRow() {
     if (manualSeries.length >= 10) return
-    const last = manualSeries[manualSeries.length - 1]
-    setManualSeries((prev) => [...prev, { reps: last?.reps || 10, poids: last?.poids || '' }])
+    const nextIndex = manualSeries.length // index 0-based de la prochaine série
+    // Si la dernière perf avait une série à cet index, pré-remplir
+    if (lastPerformance && lastPerformance.series && lastPerformance.series[nextIndex]) {
+      const s = lastPerformance.series[nextIndex]
+      setManualSeries((prev) => [...prev, {
+        reps: s.repetitions,
+        poids: s.poids_kg != null ? String(toDisplay(s.poids_kg, userUnite)) : '',
+      }])
+    } else {
+      // Sinon copier la dernière série saisie
+      const last = manualSeries[manualSeries.length - 1]
+      setManualSeries((prev) => [...prev, { reps: last?.reps || 10, poids: last?.poids || '' }])
+    }
   }
 
   // Retirer une série du formulaire manuel
@@ -758,17 +766,25 @@ function SeancePage() {
         .eq('seance_id', seanceId)
       const maxOrdre = (existingSeries || []).reduce((max, s) => Math.max(max, s.ordre || 0), -1)
 
-      const rows = manualSeries.map((s, i) => {
-        const poidsVal = s.poids !== '' && s.poids !== null && s.poids !== undefined ? parseFloat(s.poids) : null
-        return {
-          seance_id: seanceId,
-          exercice_id: selectedExercice.id,
-          ordre: maxOrdre + 1,
-          num_serie: i + 1,
-          repetitions: parseInt(s.reps) || 0,
-          poids_kg: poidsVal != null && !isNaN(poidsVal) ? toKg(poidsVal, userUnite) : null,
-        }
-      })
+      const rows = manualSeries
+        .filter((s) => parseInt(s.reps) > 0) // ignorer les séries vides
+        .map((s, i) => {
+          const poidsVal = s.poids !== '' && s.poids !== null && s.poids !== undefined ? parseFloat(s.poids) : null
+          return {
+            seance_id: seanceId,
+            exercice_id: selectedExercice.id,
+            ordre: maxOrdre + 1,
+            num_serie: i + 1,
+            repetitions: parseInt(s.reps) || 0,
+            poids_kg: poidsVal != null && !isNaN(poidsVal) ? toKg(poidsVal, userUnite) : null,
+          }
+        })
+
+      if (rows.length === 0) {
+        setManualSaving(false)
+        showToast('Aucune série à sauvegarder (reps vides)', 'error')
+        return
+      }
 
       const { error } = await supabase.from('series').insert(rows)
       if (error) throw new Error(error.message)
@@ -2371,8 +2387,8 @@ function SeancePage() {
               {manualSeries.length < 10 && (
                 <button
                   onClick={handleAddManualSerieRow}
-                  className="w-full text-xs py-2 mt-1 mb-3 rounded-md"
-                  style={{ color: '#777', border: '1px dashed rgba(255,255,255,0.1)' }}
+                  className="w-full text-sm py-2.5 mt-1 mb-3 rounded-md font-medium"
+                  style={{ color: '#999', border: '1px dashed rgba(255,255,255,0.15)', minHeight: '44px' }}
                 >
                   + Ajouter une série
                 </button>
