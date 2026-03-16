@@ -294,6 +294,20 @@ export async function POST(request) {
     const rawText = result.data.content?.[0]?.text || ''
     console.log('📝 Réponse brute Sonnet :', rawText.slice(0, 200))
 
+    // Logging consommation tokens (fire-and-forget — AVANT parsing JSON pour ne jamais rater un appel)
+    if (result.data?.usage && body.user_id) {
+      supabaseAdmin.from('api_usage').insert({
+        user_id: body.user_id,
+        model: 'claude-sonnet-4-5-20250929',
+        model_short: 'sonnet',
+        route: 'coaching',
+        mode: mode,
+        input_tokens: result.data.usage.input_tokens,
+        output_tokens: result.data.usage.output_tokens,
+        cost_usd: estimateCost('sonnet', result.data.usage.input_tokens, result.data.usage.output_tokens),
+      }).then(() => {}).catch(err => console.error('Usage log error:', err))
+    }
+
     // Parser le JSON retourné
     let parsed
     try {
@@ -307,20 +321,6 @@ export async function POST(request) {
         plan: null,
         fallback: true,
       })
-    }
-
-    // Logging consommation tokens (fire-and-forget — n'impacte pas le flow)
-    if (result.data?.usage && body.user_id) {
-      supabaseAdmin.from('api_usage').insert({
-        user_id: body.user_id,
-        model: 'claude-sonnet-4-5-20250929',
-        model_short: 'sonnet',
-        route: 'coaching',
-        mode: mode,
-        input_tokens: result.data.usage.input_tokens,
-        output_tokens: result.data.usage.output_tokens,
-        cost_usd: estimateCost('sonnet', result.data.usage.input_tokens, result.data.usage.output_tokens),
-      }).then(() => {}).catch(err => console.error('Usage log error:', err))
     }
 
     console.log(`✅ Coaching ${mode} — succès`)
