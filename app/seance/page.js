@@ -131,12 +131,12 @@ async function saveParseResult(result, seanceId, userId) {
       ordre: i,
     }))
 
-    const { error } = await supabase.from('cardio_blocs').insert(cardioRows)
+    const { data: insertedCardio, error } = await supabase.from('cardio_blocs').insert(cardioRows).select('id')
     if (error) throw new Error(`Cardio : ${error.message}`)
     console.log('✅ Cardio sauvegardé :', cardioRows.length, 'blocs')
 
-    result.cardio.forEach((bloc) => {
-      savedItems.push({ type: 'cardio', nom: bloc.type_cardio, duree: bloc.duree_minutes })
+    result.cardio.forEach((bloc, idx) => {
+      savedItems.push({ type: 'cardio', nom: bloc.type_cardio, duree: bloc.duree_minutes, cardio_bloc_id: insertedCardio?.[idx]?.id })
     })
   }
 
@@ -158,7 +158,7 @@ async function saveParseResult(result, seanceId, userId) {
       })
     }
 
-    savedItems.push({ type: 'exercice', nom: ex.nom, series: ex.series })
+    savedItems.push({ type: 'exercice', nom: ex.nom, exercice_id: exerciceId, series: ex.series })
   }
 
   if (seriesRows.length > 0) {
@@ -256,6 +256,9 @@ function SeancePage() {
 
   // ── Dernières performances batch (checklist template) ──
   const [lastPerformances, setLastPerformances] = useState({}) // { exercice_id: { date, series } }
+
+  // ── Suppression exercice en séance active ──
+  const [confirmDeleteIndex, setConfirmDeleteIndex] = useState(null) // index dans activeSeanceData
 
   // ── Afficher un toast temporaire ──
   function showToast(message, type = 'success') {
@@ -681,6 +684,38 @@ function SeancePage() {
     setManualCardioForm({ duree: '', distance: '', calories: '', fc: '', rpe: '' })
   }
 
+  // ── Suppression d'un exercice/cardio dans la séance active ──
+  function handleDeleteActiveItem(index) {
+    if (confirmDeleteIndex === index) {
+      // Deuxième tap → suppression effective
+      const item = activeSeanceData[index]
+      if (!item || !activeSeanceId) return
+
+      // Optimistic update
+      setActiveSeanceData((prev) => prev.filter((_, i) => i !== index))
+      setConfirmDeleteIndex(null)
+
+      // Suppression en DB (fire-and-forget)
+      if (item.type === 'cardio' && item.cardio_bloc_id) {
+        supabase.from('cardio_blocs').delete().eq('id', item.cardio_bloc_id)
+          .then(() => console.log('✅ Cardio supprimé :', item.nom))
+          .catch((e) => console.error('❌ Erreur suppression cardio :', e))
+      } else if (item.type === 'exercice' && item.exercice_id) {
+        supabase.from('series').delete()
+          .eq('seance_id', activeSeanceId)
+          .eq('exercice_id', item.exercice_id)
+          .then(() => console.log('✅ Séries supprimées :', item.nom))
+          .catch((e) => console.error('❌ Erreur suppression séries :', e))
+      }
+
+      showToast(`${item.nom} supprimé`)
+    } else {
+      // Premier tap → confirmation
+      setConfirmDeleteIndex(index)
+      setTimeout(() => setConfirmDeleteIndex((prev) => prev === index ? null : prev), 3000)
+    }
+  }
+
   // Ajouter une série au formulaire manuel — pré-remplir depuis dernière perf si dispo
   function handleAddManualSerieRow() {
     if (manualSeries.length >= 10) return
@@ -795,6 +830,7 @@ function SeancePage() {
       setActiveSeanceData((prev) => [...prev, {
         type: 'exercice',
         nom: selectedExercice.nom,
+        exercice_id: selectedExercice.id,
         series: rows.map((r) => ({
           num_serie: r.num_serie,
           repetitions: r.repetitions,
@@ -827,7 +863,7 @@ function SeancePage() {
         .eq('seance_id', seanceId)
       const maxOrdre = (existingCardio || []).reduce((max, c) => Math.max(max, c.ordre || 0), -1)
 
-      const { error } = await supabase.from('cardio_blocs').insert({
+      const { data: insertedCardio, error } = await supabase.from('cardio_blocs').insert({
         seance_id: seanceId,
         type_cardio: selectedExercice.nom.toLowerCase(),
         duree_minutes: parseInt(manualCardioForm.duree),
@@ -836,7 +872,7 @@ function SeancePage() {
         frequence_cardiaque: manualCardioForm.fc ? parseInt(manualCardioForm.fc) : null,
         rpe: manualCardioForm.rpe ? parseInt(manualCardioForm.rpe) : null,
         ordre: maxOrdre + 1,
-      })
+      }).select('id').single()
 
       if (error) throw new Error(error.message)
 
@@ -847,6 +883,7 @@ function SeancePage() {
         type: 'cardio',
         nom: selectedExercice.nom,
         duree: parseInt(manualCardioForm.duree),
+        cardio_bloc_id: insertedCardio?.id,
       }])
 
       showToast(`${selectedExercice.nom} ajouté ✅`)
@@ -929,6 +966,7 @@ function SeancePage() {
       setActiveSeanceData((prev) => [...prev, {
         type: 'exercice',
         nom: loggingExercice.nom,
+        exercice_id: loggingExercice.exercice_id,
         series: seriesForm.map((s, i) => ({
           num_serie: i + 1,
           repetitions: parseInt(s.reps) || 0,
@@ -1772,7 +1810,7 @@ function SeancePage() {
           <div className="flex flex-col divide-y" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
             {activeSeanceData.map((item, i) => (
               <div key={i} className="py-1.5 flex items-center justify-between">
-                <p className="text-sm truncate" style={{ color: '#f0f0f0' }}>
+                <p className="text-sm truncate flex-1" style={{ color: '#f0f0f0' }}>
                   {item.type === 'cardio' ? '🏃' : '💪'} {item.nom}
                 </p>
                 <p className="text-xs whitespace-nowrap ml-2" style={{ color: '#777' }}>
@@ -1781,6 +1819,20 @@ function SeancePage() {
                     : `${item.series?.length || 0}×${item.series?.map((s) => s.repetitions).join('-') || ''}${item.series?.[0]?.poids_kg ? ` · ${item.series[0].poids_kg}kg` : ''}`
                   }
                 </p>
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleDeleteActiveItem(i) }}
+                  className="ml-2 text-xs transition-colors"
+                  style={{
+                    color: confirmDeleteIndex === i ? '#ef4444' : '#555',
+                    minWidth: confirmDeleteIndex === i ? '80px' : '44px',
+                    minHeight: '44px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  {confirmDeleteIndex === i ? 'Supprimer ?' : '🗑️'}
+                </button>
               </div>
             ))}
           </div>
