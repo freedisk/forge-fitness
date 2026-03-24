@@ -166,6 +166,20 @@ Stockage poids TOUJOURS en kg — conversion kg/lbs uniquement à l'affichage
 - Réordonnement exercices en mode édition (boutons ↑↓, échange d'ordre en DB, normalisation séquentielle systématique)
 - Réordonnement cardio blocs en mode édition (même principe, normalisation avant chaque échange)
 
+## Bugs / Pièges connus
+- Coaching route : le logging tokens doit être fait AVANT le parsing JSON (sinon tokens perdus si JSON invalide) — corrigé Session 8
+- Filtre catalogue : les clés GROUPE_LABELS doivent matcher les valeurs DB exactes (pecs, pas pectoraux) — corrigé Session 8
+- Bouton analyse disabled : opacity-50 sur dégradé orange est insuffisant visuellement — utiliser background gris + couleur texte distincte — corrigé Session 8
+
+## Session 8 — Corrections & Features (2026-03-16)
+- Fix bouton Analyser multi-passes : style disabled nettement plus visible (fond gris, texte #555)
+- Fix filtre catalogue pectoraux → pecs + ajout full_body manquant
+- Saisie manuel : démarrage à 1 série + bouton ajouter série (pré-remplissage dernière perf)
+- Filtrage séries vides à la sauvegarde (reps=0 ignorées)
+- Séance active : suppression exercice/cardio avec confirmation inline 3s + optimistic update
+- activeSeanceData enrichi avec exercice_id et cardio_bloc_id pour suppression DB
+- Fix logging coaching : tokens tracés avant parsing JSON (fire-and-forget)
+
 ## Statut
 ✅ FORGE MVP COMPLET — 10/10 étapes + Stats + Édition séance + Mode manuel + Améliorations UX
 Production : https://forge-fitness-one.vercel.app/

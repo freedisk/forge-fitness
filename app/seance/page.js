@@ -1745,22 +1745,23 @@ function SeancePage() {
                         <div key={i} className="flex items-center gap-2 mb-1.5">
                           <span className="w-10 text-xs text-center" style={{ color: '#777' }}>{i + 1}</span>
                           <input
-                            type="number"
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
                             value={serie.reps}
-                            onChange={(e) => updateSerieForm(i, 'reps', e.target.value)}
+                            onChange={(e) => updateSerieForm(i, 'reps', e.target.value.replace(/[^0-9]/g, ''))}
                             className="flex-1 text-sm px-2 py-1.5 rounded-md outline-none text-center"
                             style={{ background: 'rgba(255,255,255,0.06)', color: '#f0f0f0', border: '1px solid rgba(255,255,255,0.1)' }}
-                            min="0"
                           />
                           <input
-                            type="number"
+                            type="text"
+                            inputMode="decimal"
+                            pattern="[0-9]*\.?[0-9]*"
                             value={serie.poids}
-                            onChange={(e) => updateSerieForm(i, 'poids', e.target.value)}
+                            onChange={(e) => updateSerieForm(i, 'poids', e.target.value.replace(/[^0-9.]/g, ''))}
                             placeholder="PDC"
                             className="flex-1 text-sm px-2 py-1.5 rounded-md outline-none text-center"
                             style={{ background: 'rgba(255,255,255,0.06)', color: '#f0f0f0', border: '1px solid rgba(255,255,255,0.1)' }}
-                            min="0"
-                            step="0.5"
                           />
                           <button
                             onClick={() => handleRemoveSerieRow(i)}
@@ -2405,25 +2406,24 @@ function SeancePage() {
                 <div key={i} className="flex items-center gap-2 mb-1.5">
                   <span className="w-10 text-xs text-center" style={{ color: '#777' }}>{i + 1}</span>
                   <input
-                    type="number"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     value={serie.reps}
-                    onChange={(e) => updateManualSerieForm(i, 'reps', e.target.value)}
+                    onChange={(e) => updateManualSerieForm(i, 'reps', e.target.value.replace(/[^0-9]/g, ''))}
                     className="flex-1 text-sm px-2 py-2 rounded-md outline-none text-center"
                     style={{ background: 'rgba(255,255,255,0.06)', color: '#f0f0f0', border: '1px solid rgba(255,255,255,0.1)', fontSize: '16px', minHeight: '44px' }}
-                    inputMode="numeric"
-                    min="1"
                   />
                   <span className="text-xs" style={{ color: '#555' }}>×</span>
                   <input
-                    type="number"
+                    type="text"
+                    inputMode="decimal"
+                    pattern="[0-9]*\.?[0-9]*"
                     value={serie.poids}
-                    onChange={(e) => updateManualSerieForm(i, 'poids', e.target.value)}
+                    onChange={(e) => updateManualSerieForm(i, 'poids', e.target.value.replace(/[^0-9.]/g, ''))}
                     placeholder="PDC"
                     className="flex-1 text-sm px-2 py-2 rounded-md outline-none text-center"
                     style={{ background: 'rgba(255,255,255,0.06)', color: '#f0f0f0', border: '1px solid rgba(255,255,255,0.1)', fontSize: '16px', minHeight: '44px' }}
-                    inputMode="decimal"
-                    min="0"
-                    step="0.5"
                   />
                   <span className="text-[10px]" style={{ color: '#555' }}>{unitLabel(userUnite)}</span>
                   <button
