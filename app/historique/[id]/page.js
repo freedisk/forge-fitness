@@ -183,8 +183,8 @@ export default function SeanceDetailPage() {
   const [nlpResult, setNlpResult] = useState(null)
   // Ajout manuel
   const [manualExoId, setManualExoId] = useState('')
-  const [manualNbSeries, setManualNbSeries] = useState(3)
-  const [manualReps, setManualReps] = useState(10)
+  const [manualNbSeries, setManualNbSeries] = useState('3')
+  const [manualReps, setManualReps] = useState('10')
   const [manualPoids, setManualPoids] = useState('')
   const [exercicesCatalogue, setExercicesCatalogue] = useState([])
   // Ajout cardio manuel
@@ -709,16 +709,18 @@ export default function SeanceDetailPage() {
 
   // ── Mode manuel : Ajouter un exercice ──
   async function addManualExercice() {
-    if (!manualExoId || !manualNbSeries || !manualReps) return
+    const nbSeries = parseInt(manualNbSeries) || 0
+    const nbReps = parseInt(manualReps) || 0
+    if (!manualExoId || nbSeries < 1 || nbReps < 1) return
 
     const rows = []
-    for (let i = 0; i < manualNbSeries; i++) {
+    for (let i = 0; i < nbSeries; i++) {
       rows.push({
         seance_id: seance.id,
         exercice_id: manualExoId,
         ordre: (seance.series?.length || 0) + 1,
         num_serie: i + 1,
-        repetitions: parseInt(manualReps),
+        repetitions: nbReps,
         poids_kg: manualPoids ? toKg(parseFloat(manualPoids), profil?.unite_poids || 'kg') : null,
       })
     }
@@ -905,8 +907,9 @@ export default function SeanceDetailPage() {
                 <div className="flex items-center gap-1">
                   <span className="text-xs" style={{ color: '#777' }}>⏱️</span>
                   <input
-                    type="number"
+                    type="text"
                     inputMode="numeric"
+                    pattern="[0-9]*"
                     defaultValue={seance.duree_totale || ''}
                     onBlur={(e) => updateSeanceMeta('duree_totale', e.target.value ? parseInt(e.target.value) : null)}
                     placeholder="min"
@@ -918,8 +921,9 @@ export default function SeanceDetailPage() {
                 <div className="flex items-center gap-1">
                   <span className="text-xs" style={{ color: '#777' }}>🔥</span>
                   <input
-                    type="number"
+                    type="text"
                     inputMode="numeric"
+                    pattern="[0-9]*"
                     defaultValue={seance.calories_totales || ''}
                     onBlur={(e) => updateSeanceMeta('calories_totales', e.target.value ? parseInt(e.target.value) : null)}
                     placeholder="kcal"
@@ -1112,8 +1116,9 @@ export default function SeanceDetailPage() {
                     <div className="flex flex-wrap items-center gap-2">
                       <div className="flex items-center gap-1">
                         <input
-                          type="number"
+                          type="text"
                           inputMode="numeric"
+                          pattern="[0-9]*"
                           defaultValue={bloc.duree_minutes || ''}
                           onBlur={(e) => updateCardio(bloc.id, 'duree_minutes', e.target.value)}
                           style={{ ...editInputStyle, width: 55, padding: '6px 8px' }}
@@ -1122,8 +1127,9 @@ export default function SeanceDetailPage() {
                       </div>
                       <div className="flex items-center gap-1">
                         <input
-                          type="number"
+                          type="text"
                           inputMode="numeric"
+                          pattern="[0-9]*"
                           defaultValue={bloc.calories || ''}
                           onBlur={(e) => updateCardio(bloc.id, 'calories', e.target.value)}
                           placeholder="cal"
@@ -1134,10 +1140,9 @@ export default function SeanceDetailPage() {
                       <div className="flex items-center gap-1">
                         <span className="text-xs" style={{ color: '#777' }}>RPE</span>
                         <input
-                          type="number"
+                          type="text"
                           inputMode="numeric"
-                          min={1}
-                          max={10}
+                          pattern="[0-9]*"
                           defaultValue={bloc.rpe || ''}
                           onBlur={(e) => updateCardio(bloc.id, 'rpe', e.target.value)}
                           style={{ ...editInputStyle, width: 45, padding: '6px 8px' }}
@@ -1459,9 +1464,9 @@ export default function SeanceDetailPage() {
                               {serie.num_serie}
                             </span>
                             <input
-                              type="number"
+                              type="text"
                               inputMode="numeric"
-                              min={1}
+                              pattern="[0-9]*"
                               defaultValue={serie.repetitions}
                               onBlur={(e) => updateSerie(serie.id, 'repetitions', e.target.value)}
                               style={{ ...editInputStyle, width: 50, padding: '6px 8px', textAlign: 'center' }}
@@ -1469,9 +1474,9 @@ export default function SeanceDetailPage() {
                             <span className="text-xs" style={{ color: '#777' }}>reps</span>
                             <span className="text-xs" style={{ color: '#555' }}>×</span>
                             <input
-                              type="number"
+                              type="text"
                               inputMode="decimal"
-                              step={0.5}
+                              pattern="[0-9]*\.?[0-9]*"
                               defaultValue={serie.poids_kg != null ? toDisplay(serie.poids_kg, unite) : ''}
                               onBlur={(e) => updateSerie(serie.id, 'poids_kg', e.target.value)}
                               placeholder="PDC"
@@ -1753,33 +1758,33 @@ export default function SeanceDetailPage() {
               <div className="flex items-center gap-3 mb-3">
                 <div className="flex items-center gap-1">
                   <input
-                    type="number"
+                    type="text"
                     inputMode="numeric"
-                    min={1}
+                    pattern="[0-9]*"
                     value={manualNbSeries}
-                    onChange={(e) => setManualNbSeries(parseInt(e.target.value) || 1)}
+                    onChange={(e) => setManualNbSeries(e.target.value.replace(/[^0-9]/g, ''))}
                     style={{ ...editInputStyle, width: 50, textAlign: 'center', padding: '6px 8px' }}
                   />
                   <span className="text-xs" style={{ color: '#777' }}>séries</span>
                 </div>
                 <div className="flex items-center gap-1">
                   <input
-                    type="number"
+                    type="text"
                     inputMode="numeric"
-                    min={1}
+                    pattern="[0-9]*"
                     value={manualReps}
-                    onChange={(e) => setManualReps(parseInt(e.target.value) || 1)}
+                    onChange={(e) => setManualReps(e.target.value.replace(/[^0-9]/g, ''))}
                     style={{ ...editInputStyle, width: 50, textAlign: 'center', padding: '6px 8px' }}
                   />
                   <span className="text-xs" style={{ color: '#777' }}>reps</span>
                 </div>
                 <div className="flex items-center gap-1">
                   <input
-                    type="number"
+                    type="text"
                     inputMode="decimal"
-                    step={0.5}
+                    pattern="[0-9]*\.?[0-9]*"
                     value={manualPoids}
-                    onChange={(e) => setManualPoids(e.target.value)}
+                    onChange={(e) => setManualPoids(e.target.value.replace(/[^0-9.]/g, ''))}
                     placeholder="PDC"
                     style={{ ...editInputStyle, width: 60, textAlign: 'center', padding: '6px 8px' }}
                   />
@@ -1817,10 +1822,11 @@ export default function SeanceDetailPage() {
               <div className="flex items-center gap-3 mb-3">
                 <div className="flex items-center gap-1">
                   <input
-                    type="number"
+                    type="text"
                     inputMode="numeric"
+                    pattern="[0-9]*"
                     value={newCardioDuree}
-                    onChange={(e) => setNewCardioDuree(e.target.value)}
+                    onChange={(e) => setNewCardioDuree(e.target.value.replace(/[^0-9]/g, ''))}
                     placeholder="20"
                     style={{ ...editInputStyle, width: 55, textAlign: 'center', padding: '6px 8px' }}
                   />
@@ -1828,10 +1834,11 @@ export default function SeanceDetailPage() {
                 </div>
                 <div className="flex items-center gap-1">
                   <input
-                    type="number"
+                    type="text"
                     inputMode="numeric"
+                    pattern="[0-9]*"
                     value={newCardioCalories}
-                    onChange={(e) => setNewCardioCalories(e.target.value)}
+                    onChange={(e) => setNewCardioCalories(e.target.value.replace(/[^0-9]/g, ''))}
                     placeholder="cal"
                     style={{ ...editInputStyle, width: 55, textAlign: 'center', padding: '6px 8px' }}
                   />
@@ -1840,12 +1847,11 @@ export default function SeanceDetailPage() {
                 <div className="flex items-center gap-1">
                   <span className="text-xs" style={{ color: '#777' }}>RPE</span>
                   <input
-                    type="number"
+                    type="text"
                     inputMode="numeric"
-                    min={1}
-                    max={10}
+                    pattern="[0-9]*"
                     value={newCardioRpe}
-                    onChange={(e) => setNewCardioRpe(e.target.value)}
+                    onChange={(e) => setNewCardioRpe(e.target.value.replace(/[^0-9]/g, ''))}
                     style={{ ...editInputStyle, width: 45, textAlign: 'center', padding: '6px 8px' }}
                   />
                 </div>
