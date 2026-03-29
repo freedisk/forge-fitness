@@ -267,6 +267,10 @@ function SeancePage() {
   // ── Progression tracker : dernières perfs des exercices en séance active ──
   const [activeLastPerfs, setActiveLastPerfs] = useState({}) // { exercice_id: { date, series } }
 
+  // ── Quick-log vocal (Web Speech API) ──
+  const [isListening, setIsListening] = useState(false)
+  const recognitionRef = useRef(null)
+
   // ── Afficher un toast temporaire ──
   function showToast(message, type = 'success') {
     setToast({ message, type })
@@ -695,6 +699,54 @@ function SeancePage() {
     if (newIds.length === 0) return
     const perfs = await getLastPerformanceBatch(newIds)
     setActiveLastPerfs(prev => ({ ...prev, ...perfs }))
+  }
+
+  // ── Quick-log vocal : toggle micro ──
+  function toggleVoice() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      showToast('Reconnaissance vocale non supportée sur ce navigateur', 'error')
+      return
+    }
+
+    if (isListening) {
+      recognitionRef.current?.stop()
+      setIsListening(false)
+      return
+    }
+
+    const recognition = new SpeechRecognition()
+    recognition.lang = 'fr-FR'
+    recognition.continuous = true
+    recognition.interimResults = false
+    recognitionRef.current = recognition
+
+    recognition.onresult = (event) => {
+      let transcript = ''
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+          transcript += event.results[i][0].transcript
+        }
+      }
+      if (transcript.trim()) {
+        setTexteInput(prev => prev ? prev + ' ' + transcript.trim() : transcript.trim())
+      }
+    }
+
+    recognition.onerror = (event) => {
+      console.warn('🎤 Erreur reconnaissance vocale :', event.error)
+      if (event.error !== 'no-speech') {
+        showToast('Erreur micro : ' + event.error, 'error')
+      }
+      setIsListening(false)
+    }
+
+    recognition.onend = () => {
+      setIsListening(false)
+    }
+
+    recognition.start()
+    setIsListening(true)
   }
 
   // Sélectionner un exercice dans le catalogue
@@ -2053,6 +2105,27 @@ function SeancePage() {
             }}
           />
 
+          {/* Boutons Micro + Analyser */}
+          <div className="flex gap-2 mt-3">
+            {/* Bouton micro — speech-to-text */}
+            <button
+              onClick={toggleVoice}
+              className="flex items-center justify-center transition-all"
+              style={{
+                width: 48,
+                height: 48,
+                borderRadius: 10,
+                background: isListening ? 'rgba(239,68,68,0.2)' : 'rgba(255,255,255,0.06)',
+                border: isListening ? '2px solid #ef4444' : '1px solid rgba(255,255,255,0.1)',
+                color: isListening ? '#ef4444' : '#777',
+                fontSize: 20,
+                flexShrink: 0,
+              }}
+              title={isListening ? 'Arrêter le micro' : 'Dicter ta séance'}
+            >
+              {isListening ? '⏹️' : '🎤'}
+            </button>
+
           {/* Bouton Analyser — désactivé si vide ou < 5 chars */}
           {(() => {
             const analyzeDisabled = status === 'loading' || !texteInput.trim() || texteInput.trim().length < 5
@@ -2060,7 +2133,7 @@ function SeancePage() {
               <button
                 onClick={handleAnalyze}
                 disabled={analyzeDisabled}
-                className="w-full mt-3 py-3.5 text-sm font-bold transition-all"
+                className="flex-1 py-3.5 text-sm font-bold transition-all"
                 style={{
                   background: analyzeDisabled && status !== 'loading'
                     ? 'rgba(255,255,255,0.08)'
@@ -2080,6 +2153,7 @@ function SeancePage() {
               </button>
             )
           })()}
+          </div>
 
           {/* Message d'erreur */}
           {status === 'error' && errorMsg && (
