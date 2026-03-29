@@ -19,6 +19,12 @@ export default function ProfilPage() {
   const [usageMonth, setUsageMonth] = useState(null)
   const [usageAll, setUsageAll] = useState(null)
 
+  // Export données
+  const [exportPeriod, setExportPeriod] = useState('all')
+  const [exportDateFrom, setExportDateFrom] = useState('')
+  const [exportDateTo, setExportDateTo] = useState('')
+  const [exporting, setExporting] = useState(false)
+
   // Champs du formulaire
   const [age, setAge] = useState('')
   const [sexe, setSexe] = useState('')
@@ -319,6 +325,20 @@ export default function ProfilPage() {
         </button>
       </form>
 
+      {/* ═══ EXPORT DONNÉES ═══ */}
+      <ExportSection
+        userId={userId}
+        exportPeriod={exportPeriod}
+        setExportPeriod={setExportPeriod}
+        exportDateFrom={exportDateFrom}
+        setExportDateFrom={setExportDateFrom}
+        exportDateTo={exportDateTo}
+        setExportDateTo={setExportDateTo}
+        exporting={exporting}
+        setExporting={setExporting}
+        userUnite={unite}
+      />
+
       {/* ═══ CONSOMMATION API ═══ */}
       {usageMonth && (
         <UsageSection usageMonth={usageMonth} usageAll={usageAll} />
@@ -340,6 +360,255 @@ export default function ProfilPage() {
 }
 
 // ═══ Composant consommation API ═══
+
+// ═══ Composant Export Données ═══
+
+const EXPORT_PERIODS = [
+  { value: 'month', label: 'Mois en cours' },
+  { value: '3months', label: '3 mois' },
+  { value: '6months', label: '6 mois' },
+  { value: 'year', label: '1 an' },
+  { value: 'all', label: 'Tout' },
+  { value: 'custom', label: 'Période libre' },
+]
+
+function getExportDateRange(period, dateFrom, dateTo) {
+  const now = new Date()
+  let from = null
+  if (period === 'month') {
+    from = new Date(now.getFullYear(), now.getMonth(), 1)
+  } else if (period === '3months') {
+    from = new Date(now)
+    from.setMonth(from.getMonth() - 3)
+  } else if (period === '6months') {
+    from = new Date(now)
+    from.setMonth(from.getMonth() - 6)
+  } else if (period === 'year') {
+    from = new Date(now)
+    from.setFullYear(from.getFullYear() - 1)
+  } else if (period === 'custom' && dateFrom) {
+    from = new Date(dateFrom)
+  }
+  const to = period === 'custom' && dateTo ? new Date(dateTo + 'T23:59:59') : null
+  return { from: from?.toISOString() || null, to: to?.toISOString() || null }
+}
+
+async function fetchExportData(userId, period, dateFrom, dateTo) {
+  const { from, to } = getExportDateRange(period, dateFrom, dateTo)
+
+  let query = supabase
+    .from('seances')
+    .select('*, series(*, exercices(nom, categorie, groupe_musculaire, type)), cardio_blocs(*)')
+    .eq('user_id', userId)
+    .order('date', { ascending: false })
+
+  if (from) query = query.gte('date', from.split('T')[0])
+  if (to) query = query.lte('date', to.split('T')[0])
+
+  const { data, error } = await query
+  if (error) throw new Error(error.message)
+  return data || []
+}
+
+function generateCSV(seances) {
+  const headers = [
+    'date', 'heure_debut', 'contexte', 'duree_min', 'calories', 'rpe', 'notes',
+    'type', 'exercice', 'categorie', 'groupe_musculaire', 'type_exercice',
+    'num_serie', 'repetitions', 'poids_kg',
+    'type_cardio', 'duree_cardio_min', 'distance_km', 'calories_cardio', 'fc', 'rpe_cardio',
+  ]
+
+  const rows = [headers.join(',')]
+
+  for (const s of seances) {
+    const base = [
+      s.date, s.heure_debut || '', s.contexte || '', s.duree_totale || '', s.calories_totales || '', s.rpe || '',
+      `"${(s.notes || '').replace(/"/g, '""')}"`,
+    ]
+
+    // Séries groupées par exercice
+    const series = (s.series || []).sort((a, b) => (a.ordre || 0) - (b.ordre || 0) || a.num_serie - b.num_serie)
+    for (const ser of series) {
+      rows.push([
+        ...base, 'exercice',
+        `"${ser.exercices?.nom || ''}"`, ser.exercices?.categorie || '', ser.exercices?.groupe_musculaire || '', ser.exercices?.type || '',
+        ser.num_serie, ser.repetitions, ser.poids_kg ?? '',
+        '', '', '', '', '', '',
+      ].join(','))
+    }
+
+    // Cardio
+    for (const c of (s.cardio_blocs || []).sort((a, b) => (a.ordre || 0) - (b.ordre || 0))) {
+      rows.push([
+        ...base, 'cardio',
+        '', '', '', '',
+        '', '', '',
+        c.type_cardio || '', c.duree_minutes || '', c.distance_km ?? '', c.calories ?? '', c.frequence_cardiaque ?? '', c.rpe ?? '',
+      ].join(','))
+    }
+
+    // Séance sans exercices ni cardio → 1 ligne quand même
+    if (series.length === 0 && (s.cardio_blocs || []).length === 0) {
+      rows.push([...base, '', '', '', '', '', '', '', '', '', '', '', '', '', ''].join(','))
+    }
+  }
+
+  return rows.join('\n')
+}
+
+function generateJSON(seances) {
+  const clean = seances.map(s => ({
+    date: s.date,
+    heure_debut: s.heure_debut,
+    contexte: s.contexte,
+    duree_totale: s.duree_totale,
+    calories_totales: s.calories_totales,
+    rpe: s.rpe,
+    notes: s.notes,
+    coaching_before: s.coaching_before,
+    coaching_during: s.coaching_during,
+    coaching_after: s.coaching_after,
+    exercices: Object.values(
+      (s.series || []).reduce((acc, ser) => {
+        const id = ser.exercice_id
+        if (!acc[id]) acc[id] = {
+          nom: ser.exercices?.nom, categorie: ser.exercices?.categorie,
+          groupe_musculaire: ser.exercices?.groupe_musculaire, type: ser.exercices?.type,
+          series: [],
+        }
+        acc[id].series.push({ num_serie: ser.num_serie, repetitions: ser.repetitions, poids_kg: ser.poids_kg })
+        return acc
+      }, {})
+    ),
+    cardio: (s.cardio_blocs || []).map(c => ({
+      type: c.type_cardio, duree_minutes: c.duree_minutes,
+      distance_km: c.distance_km, calories: c.calories,
+      frequence_cardiaque: c.frequence_cardiaque, rpe: c.rpe,
+    })),
+  }))
+  return JSON.stringify(clean, null, 2)
+}
+
+function downloadFile(content, filename, mimeType) {
+  const blob = new Blob([content], { type: mimeType })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function ExportSection({ userId, exportPeriod, setExportPeriod, exportDateFrom, setExportDateFrom, exportDateTo, setExportDateTo, exporting, setExporting }) {
+  const [exportToast, setExportToast] = useState(null)
+
+  async function handleExport(format) {
+    if (!userId) return
+    setExporting(true)
+    try {
+      const seances = await fetchExportData(userId, exportPeriod, exportDateFrom, exportDateTo)
+      if (seances.length === 0) {
+        setExportToast('Aucune séance sur cette période')
+        setTimeout(() => setExportToast(null), 3000)
+        setExporting(false)
+        return
+      }
+
+      const dateStr = new Date().toISOString().split('T')[0]
+      if (format === 'csv') {
+        const csv = generateCSV(seances)
+        downloadFile(csv, `forge-export-${dateStr}.csv`, 'text/csv;charset=utf-8')
+      } else {
+        const json = generateJSON(seances)
+        downloadFile(json, `forge-export-${dateStr}.json`, 'application/json')
+      }
+      setExportToast(`${seances.length} séance${seances.length > 1 ? 's' : ''} exportée${seances.length > 1 ? 's' : ''} ✅`)
+      setTimeout(() => setExportToast(null), 3000)
+    } catch (err) {
+      console.error('❌ Erreur export :', err)
+      setExportToast('Erreur lors de l\'export')
+      setTimeout(() => setExportToast(null), 3000)
+    }
+    setExporting(false)
+  }
+
+  return (
+    <div className="max-w-sm mt-8">
+      <h2 className="text-lg font-bold mb-3" style={{ color: '#f0f0f0' }}>📥 Export données</h2>
+
+      {/* Sélecteur période */}
+      <div className="flex flex-wrap gap-1.5 mb-3">
+        {EXPORT_PERIODS.map(p => (
+          <button
+            key={p.value}
+            onClick={() => setExportPeriod(p.value)}
+            className="px-2.5 py-1.5 rounded-full text-xs font-medium transition-colors"
+            style={{
+              background: exportPeriod === p.value ? '#f97316' : 'rgba(255,255,255,0.07)',
+              color: exportPeriod === p.value ? '#fff' : '#777',
+            }}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Période libre — date pickers */}
+      {exportPeriod === 'custom' && (
+        <div className="flex gap-2 mb-3">
+          <div className="flex-1">
+            <label className="text-[10px] block mb-1" style={{ color: '#555' }}>Du</label>
+            <input
+              type="date"
+              value={exportDateFrom}
+              onChange={e => setExportDateFrom(e.target.value)}
+              className="w-full text-sm px-2 py-2 rounded-lg outline-none"
+              style={{ background: 'rgba(255,255,255,0.06)', color: '#f0f0f0', border: '1px solid rgba(255,255,255,0.1)' }}
+            />
+          </div>
+          <div className="flex-1">
+            <label className="text-[10px] block mb-1" style={{ color: '#555' }}>Au</label>
+            <input
+              type="date"
+              value={exportDateTo}
+              onChange={e => setExportDateTo(e.target.value)}
+              className="w-full text-sm px-2 py-2 rounded-lg outline-none"
+              style={{ background: 'rgba(255,255,255,0.06)', color: '#f0f0f0', border: '1px solid rgba(255,255,255,0.1)' }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Boutons export */}
+      <div className="flex gap-2">
+        <button
+          onClick={() => handleExport('csv')}
+          disabled={exporting || (exportPeriod === 'custom' && !exportDateFrom)}
+          className="flex-1 py-2.5 text-sm font-semibold rounded-lg transition-colors disabled:opacity-40"
+          style={{ background: 'rgba(34,197,94,0.12)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.25)' }}
+        >
+          {exporting ? '...' : '📊 CSV'}
+        </button>
+        <button
+          onClick={() => handleExport('json')}
+          disabled={exporting || (exportPeriod === 'custom' && !exportDateFrom)}
+          className="flex-1 py-2.5 text-sm font-semibold rounded-lg transition-colors disabled:opacity-40"
+          style={{ background: 'rgba(59,130,246,0.12)', color: '#3b82f6', border: '1px solid rgba(59,130,246,0.25)' }}
+        >
+          {exporting ? '...' : '📋 JSON'}
+        </button>
+      </div>
+
+      <p className="text-[10px] mt-2 italic" style={{ color: '#444' }}>
+        CSV : 1 ligne par série — ouvrable dans Excel / Google Sheets. JSON : structure hiérarchique avec coaching.
+      </p>
+
+      {exportToast && (
+        <p className="text-xs text-center mt-2 font-medium" style={{ color: '#22c55e' }}>{exportToast}</p>
+      )}
+    </div>
+  )
+}
 
 function getISOWeek(date) {
   const d = new Date(date)

@@ -142,6 +142,7 @@ Stockage poids TOUJOURS en kg — conversion kg/lbs uniquement à l'affichage
 - Quick-log vocal : bouton 🎤 Web Speech API (fr-FR, continuous) → dictée → textarea NLP → Analyser
 - Toggle kg/lbs dans le formulaire saisie manuel + décimales (virgule française → point)
 - Workout share : bouton 📸 Partager post-séance → image Canvas 1080×1920 stylisée (Web Share API + fallback download PNG)
+- Export données : CSV aplati (1 ligne/série) + JSON structuré (hiérarchie séance→exercices→séries + coaching) — sélecteur période (mois/3m/6m/1an/tout/libre) dans /profil
 
 ## Catalogue exercices
 - TOUS les exercices éditables (nom, catégorie, groupe musculaire, type) — bouton ✏️ universel
