@@ -138,6 +138,10 @@ Stockage poids TOUJOURS en kg — conversion kg/lbs uniquement à l'affichage
 - Batch loading des dernières perfs (1 requête pour tous les exercices du template)
 - Suppression séance depuis la liste /historique (bouton 🗑️, confirmation avec date, optimistic update, CASCADE)
 - Modal détail exercice en séance active : tap sur un item du récap → modale avec tableau séries/reps/poids (conversion kg/lbs), résumé volume, cardio durée
+- Progression tracker temps réel : badges comparaison vs dernière séance (🏆 PR, ↑ reps/poids, = identique, ↓) — chargement auto via getLastPerformanceBatch
+- Quick-log vocal : bouton 🎤 Web Speech API (fr-FR, continuous) → dictée → textarea NLP → Analyser
+- Toggle kg/lbs dans le formulaire saisie manuel + décimales (virgule française → point)
+- Workout share : bouton 📸 Partager post-séance → image Canvas 1080×1920 stylisée (Web Share API + fallback download PNG)
 
 ## Catalogue exercices
 - TOUS les exercices éditables (nom, catégorie, groupe musculaire, type) — bouton ✏️ universel
