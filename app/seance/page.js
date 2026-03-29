@@ -264,6 +264,9 @@ function SeancePage() {
   // ── Modal détail exercice en séance active ──
   const [detailItem, setDetailItem] = useState(null)
 
+  // ── Progression tracker : dernières perfs des exercices en séance active ──
+  const [activeLastPerfs, setActiveLastPerfs] = useState({}) // { exercice_id: { date, series } }
+
   // ── Afficher un toast temporaire ──
   function showToast(message, type = 'success') {
     setToast({ message, type })
@@ -652,6 +655,48 @@ function SeancePage() {
     }
   }
 
+  // ── Comparer un exercice sauvegardé avec sa dernière performance ──
+  function compareWithLastPerf(item) {
+    if (item.type !== 'exercice' || !item.exercice_id || !item.series?.length) return null
+    const lastPerf = activeLastPerfs[item.exercice_id]
+    if (!lastPerf || !lastPerf.series?.length) return { label: 'Nouveau', color: '#3b82f6', icon: '🆕' }
+
+    const currMaxPoids = Math.max(...item.series.map(s => s.poids_kg || 0))
+    const prevMaxPoids = Math.max(...lastPerf.series.map(s => s.poids_kg || 0))
+    const currTotalReps = item.series.reduce((sum, s) => sum + (s.repetitions || 0), 0)
+    const prevTotalReps = lastPerf.series.reduce((sum, s) => sum + (s.repetitions || 0), 0)
+
+    // PR poids
+    if (currMaxPoids > prevMaxPoids && currMaxPoids > 0) {
+      const diff = currMaxPoids - prevMaxPoids
+      return { label: `+${toDisplay(diff, userUnite)}${unitLabel(userUnite)}`, color: '#22c55e', icon: '🏆' }
+    }
+    // Plus de reps
+    if (currTotalReps > prevTotalReps) {
+      return { label: `+${currTotalReps - prevTotalReps} reps`, color: '#22c55e', icon: '↑' }
+    }
+    // Identique
+    if (currTotalReps === prevTotalReps && currMaxPoids === prevMaxPoids) {
+      return { label: '= identique', color: '#eab308', icon: '→' }
+    }
+    // Moins
+    if (currTotalReps < prevTotalReps || currMaxPoids < prevMaxPoids) {
+      const diffReps = currTotalReps - prevTotalReps
+      return { label: `${diffReps} reps`, color: '#f97316', icon: '↓' }
+    }
+    return null
+  }
+
+  // ── Charger les dernières perfs pour les exercices de la séance active ──
+  async function loadActiveLastPerfs(exerciceIds) {
+    if (!exerciceIds.length || !userId) return
+    // Ne charger que les IDs pas encore en cache
+    const newIds = exerciceIds.filter(id => !activeLastPerfs[id])
+    if (newIds.length === 0) return
+    const perfs = await getLastPerformanceBatch(newIds)
+    setActiveLastPerfs(prev => ({ ...prev, ...perfs }))
+  }
+
   // Sélectionner un exercice dans le catalogue
   async function handleSelectExercice(ex) {
     setSelectedExercice(ex)
@@ -843,6 +888,7 @@ function SeancePage() {
       }])
 
       showToast(`${selectedExercice.nom} ajouté ✅`)
+      loadActiveLastPerfs([selectedExercice.id])
       handleBackToSelector()
     } catch (err) {
       console.error('❌ Erreur sauvegarde manuelle :', err)
@@ -1230,6 +1276,9 @@ function SeancePage() {
       setParseResult(null)
       setStatus('idle')
       showToast('Exercices ajoutés à la séance !')
+      // Charger les dernières perfs pour le progression tracker
+      const exoIds = savedItems.filter(it => it.type === 'exercice' && it.exercice_id).map(it => it.exercice_id)
+      loadActiveLastPerfs(exoIds)
 
       localStorage.setItem(LS_KEY, JSON.stringify({
         seanceId,
@@ -1274,6 +1323,9 @@ function SeancePage() {
       setParseResult(null)
       setStatus('idle')
       showToast('Exercices ajoutés à la séance !')
+      // Charger les dernières perfs pour le progression tracker
+      const exoIds = savedItems.filter(it => it.type === 'exercice' && it.exercice_id).map(it => it.exercice_id)
+      loadActiveLastPerfs(exoIds)
 
       localStorage.setItem(LS_KEY, JSON.stringify({
         seanceId: activeSeanceId,
@@ -1822,12 +1874,23 @@ function SeancePage() {
                 <p className="text-sm truncate flex-1" style={{ color: '#f0f0f0' }}>
                   {item.type === 'cardio' ? '🏃' : '💪'} {item.nom}
                 </p>
-                <p className="text-xs whitespace-nowrap ml-2" style={{ color: '#777' }}>
-                  {item.type === 'cardio'
-                    ? `${item.duree} min`
-                    : `${item.series?.length || 0}×${item.series?.map((s) => s.repetitions).join('-') || ''}${item.series?.[0]?.poids_kg ? ` · ${item.series[0].poids_kg}kg` : ''}`
-                  }
-                </p>
+                <div className="flex items-center gap-1.5 ml-2 flex-shrink-0">
+                  {(() => {
+                    const comp = compareWithLastPerf(item)
+                    if (comp) return (
+                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap" style={{ background: `${comp.color}20`, color: comp.color }}>
+                        {comp.icon} {comp.label}
+                      </span>
+                    )
+                    return null
+                  })()}
+                  <p className="text-xs whitespace-nowrap" style={{ color: '#777' }}>
+                    {item.type === 'cardio'
+                      ? `${item.duree} min`
+                      : `${item.series?.length || 0}×${item.series?.map((s) => s.repetitions).join('-') || ''}${item.series?.[0]?.poids_kg ? ` · ${toDisplay(item.series[0].poids_kg, userUnite)}${unitLabel(userUnite)}` : ''}`
+                    }
+                  </p>
+                </div>
                 <button
                   onClick={(e) => { e.stopPropagation(); handleDeleteActiveItem(i) }}
                   className="ml-2 text-xs transition-colors"
