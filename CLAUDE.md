@@ -137,6 +137,7 @@ Stockage poids TOUJOURS en kg — conversion kg/lbs uniquement à l'affichage
 - Dernière performance affichée dans la checklist template (pré-remplissage + résumé "3×10 × 60kg — il y a 3j")
 - Batch loading des dernières perfs (1 requête pour tous les exercices du template)
 - Suppression séance depuis la liste /historique (bouton 🗑️, confirmation avec date, optimistic update, CASCADE)
+- Modal détail exercice en séance active : tap sur un item du récap → modale avec tableau séries/reps/poids (conversion kg/lbs), résumé volume, cardio durée
 
 ## Catalogue exercices
 - TOUS les exercices éditables (nom, catégorie, groupe musculaire, type) — bouton ✏️ universel

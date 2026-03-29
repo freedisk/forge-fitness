@@ -261,6 +261,9 @@ function SeancePage() {
   // ── Suppression exercice en séance active ──
   const [confirmDeleteIndex, setConfirmDeleteIndex] = useState(null) // index dans activeSeanceData
 
+  // ── Modal détail exercice en séance active ──
+  const [detailItem, setDetailItem] = useState(null)
+
   // ── Afficher un toast temporaire ──
   function showToast(message, type = 'success') {
     setToast({ message, type })
@@ -1815,7 +1818,7 @@ function SeancePage() {
           </p>
           <div className="flex flex-col divide-y" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
             {activeSeanceData.map((item, i) => (
-              <div key={i} className="py-1.5 flex items-center justify-between">
+              <div key={i} className="py-1.5 flex items-center justify-between cursor-pointer" onClick={() => setDetailItem(item)}>
                 <p className="text-sm truncate flex-1" style={{ color: '#f0f0f0' }}>
                   {item.type === 'cardio' ? '🏃' : '💪'} {item.nom}
                 </p>
@@ -2636,6 +2639,74 @@ function SeancePage() {
             >
               ✏️ Modifier
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL DÉTAIL EXERCICE ── */}
+      {detailItem && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)' }}
+          onClick={() => setDetailItem(null)}
+        >
+          <div
+            className="mx-4 w-full max-w-sm rounded-[14px] px-5 py-4"
+            style={{ background: '#1a1a1a', border: '1px solid rgba(249,115,22,0.3)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-base font-bold" style={{ color: '#f97316' }}>
+                {detailItem.type === 'cardio' ? '🏃' : '💪'} {detailItem.nom}
+              </p>
+              <button
+                onClick={() => setDetailItem(null)}
+                className="flex items-center justify-center"
+                style={{ width: 32, height: 32, color: '#777', fontSize: 18 }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Contenu exercice */}
+            {detailItem.type === 'exercice' && detailItem.series?.length > 0 && (
+              <div>
+                <div className="grid grid-cols-3 gap-2 mb-1">
+                  <p className="text-[10px] font-semibold uppercase" style={{ color: '#555' }}>Série</p>
+                  <p className="text-[10px] font-semibold uppercase" style={{ color: '#555' }}>Reps</p>
+                  <p className="text-[10px] font-semibold uppercase" style={{ color: '#555' }}>Poids</p>
+                </div>
+                {detailItem.series.map((s, idx) => (
+                  <div key={idx} className="grid grid-cols-3 gap-2 py-1.5" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                    <p className="text-sm" style={{ color: '#777' }}>{s.num_serie || idx + 1}</p>
+                    <p className="text-sm font-medium" style={{ color: '#f0f0f0' }}>{s.repetitions}</p>
+                    <p className="text-sm" style={{ color: '#f0f0f0' }}>
+                      {s.poids_kg != null ? `${toDisplay(s.poids_kg, userUnite)} ${unitLabel(userUnite)}` : 'PDC'}
+                    </p>
+                  </div>
+                ))}
+                <div className="mt-2 pt-2" style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                  <p className="text-xs" style={{ color: '#777' }}>
+                    {detailItem.series.length} série{detailItem.series.length > 1 ? 's' : ''}
+                    {' · '}
+                    {detailItem.series.reduce((sum, s) => sum + (s.repetitions || 0), 0)} reps totales
+                    {detailItem.series[0]?.poids_kg != null && (
+                      <> {' · '} {toDisplay(Math.max(...detailItem.series.map(s => s.poids_kg || 0)), userUnite)} {unitLabel(userUnite)} max</>
+                    )}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Contenu cardio */}
+            {detailItem.type === 'cardio' && (
+              <div>
+                <p className="text-sm" style={{ color: '#f0f0f0' }}>
+                  ⏱️ {detailItem.duree} minutes
+                </p>
+              </div>
+            )}
           </div>
         </div>
       )}
