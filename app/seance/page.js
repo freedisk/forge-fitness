@@ -1555,6 +1555,147 @@ function SeancePage() {
     router.push('/')
   }
 
+  // ── Partager le résumé de séance (Canvas → PNG → Web Share API) ──
+  async function handleShareWorkout() {
+    try {
+      const canvas = document.createElement('canvas')
+      const W = 1080, H = 1920
+      canvas.width = W
+      canvas.height = H
+      const ctx = canvas.getContext('2d')
+
+      // Fond dégradé sombre
+      const grad = ctx.createLinearGradient(0, 0, 0, H)
+      grad.addColorStop(0, '#0a0a0a')
+      grad.addColorStop(1, '#1a1a1a')
+      ctx.fillStyle = grad
+      ctx.fillRect(0, 0, W, H)
+
+      // Bordure orange subtile
+      ctx.strokeStyle = 'rgba(249,115,22,0.3)'
+      ctx.lineWidth = 4
+      ctx.strokeRect(40, 40, W - 80, H - 80)
+
+      // Header
+      ctx.fillStyle = '#f97316'
+      ctx.font = 'bold 72px -apple-system, BlinkMacSystemFont, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillText('⚡ FORGE', W / 2, 160)
+
+      ctx.fillStyle = '#777'
+      ctx.font = '36px -apple-system, BlinkMacSystemFont, sans-serif'
+      const dateStr = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+      ctx.fillText(dateStr, W / 2, 230)
+
+      // Métriques
+      let y = 340
+      const metrics = []
+      if (bilanDuree) metrics.push({ icon: '⏱️', label: 'Durée', value: `${bilanDuree} min` })
+      if (bilanCalories) metrics.push({ icon: '🔥', label: 'Calories', value: `${bilanCalories} kcal` })
+      if (bilanRpe) metrics.push({ icon: '💪', label: 'RPE', value: `${bilanRpe}/10` })
+
+      const totalReps = activeSeanceData.filter(it => it.type === 'exercice').reduce((sum, it) => sum + (it.series?.reduce((s, ser) => s + (ser.repetitions || 0), 0) || 0), 0)
+      if (totalReps > 0) metrics.push({ icon: '🏋️', label: 'Volume', value: `${totalReps} reps` })
+
+      if (metrics.length > 0) {
+        const mW = 220, gap = 20
+        const totalW = metrics.length * mW + (metrics.length - 1) * gap
+        let mx = (W - totalW) / 2
+
+        for (const m of metrics) {
+          ctx.fillStyle = 'rgba(249,115,22,0.08)'
+          ctx.beginPath()
+          ctx.roundRect(mx, y, mW, 130, 16)
+          ctx.fill()
+          ctx.strokeStyle = 'rgba(249,115,22,0.2)'
+          ctx.lineWidth = 1
+          ctx.stroke()
+
+          ctx.fillStyle = '#f97316'
+          ctx.font = 'bold 44px -apple-system, BlinkMacSystemFont, sans-serif'
+          ctx.textAlign = 'center'
+          ctx.fillText(m.value, mx + mW / 2, y + 60)
+          ctx.fillStyle = '#777'
+          ctx.font = '28px -apple-system, BlinkMacSystemFont, sans-serif'
+          ctx.fillText(m.label, mx + mW / 2, y + 105)
+          mx += mW + gap
+        }
+        y += 190
+      }
+
+      // Exercices
+      ctx.textAlign = 'left'
+      const exercices = activeSeanceData.filter(it => it.type === 'exercice')
+      const cardios = activeSeanceData.filter(it => it.type === 'cardio')
+
+      if (cardios.length > 0) {
+        ctx.fillStyle = '#3b82f6'
+        ctx.font = 'bold 32px -apple-system, BlinkMacSystemFont, sans-serif'
+        ctx.fillText('CARDIO', 80, y)
+        y += 50
+        for (const c of cardios) {
+          ctx.fillStyle = '#f0f0f0'
+          ctx.font = '34px -apple-system, BlinkMacSystemFont, sans-serif'
+          ctx.fillText(`🏃 ${c.nom}`, 100, y)
+          ctx.fillStyle = '#777'
+          ctx.fillText(`${c.duree} min`, 700, y)
+          y += 55
+        }
+        y += 20
+      }
+
+      if (exercices.length > 0) {
+        ctx.fillStyle = '#f97316'
+        ctx.font = 'bold 32px -apple-system, BlinkMacSystemFont, sans-serif'
+        ctx.fillText('EXERCICES', 80, y)
+        y += 50
+        for (const ex of exercices) {
+          if (y > H - 200) break // sécurité overflow
+          const seriesStr = ex.series?.length ? `${ex.series.length}×${ex.series[0]?.repetitions || '?'}` : ''
+          const poidsStr = ex.series?.[0]?.poids_kg ? ` · ${toDisplay(ex.series[0].poids_kg, userUnite)}${unitLabel(userUnite)}` : ''
+
+          ctx.fillStyle = '#f0f0f0'
+          ctx.font = '34px -apple-system, BlinkMacSystemFont, sans-serif'
+          ctx.fillText(`💪 ${ex.nom}`, 100, y)
+          ctx.fillStyle = '#999'
+          ctx.font = '30px -apple-system, BlinkMacSystemFont, sans-serif'
+          ctx.textAlign = 'right'
+          ctx.fillText(`${seriesStr}${poidsStr}`, W - 100, y)
+          ctx.textAlign = 'left'
+          y += 55
+        }
+      }
+
+      // Footer
+      ctx.fillStyle = '#333'
+      ctx.font = '26px -apple-system, BlinkMacSystemFont, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillText('forge-fitness-one.vercel.app', W / 2, H - 80)
+
+      // Export
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'))
+      const file = new File([blob], 'forge-workout.png', { type: 'image/png' })
+
+      if (navigator.share && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: 'Ma séance FORGE' })
+      } else {
+        // Fallback : télécharger
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = 'forge-workout.png'
+        a.click()
+        URL.revokeObjectURL(url)
+        showToast('Image téléchargée 📸')
+      }
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        console.error('❌ Erreur partage :', err)
+        showToast('Erreur lors du partage', 'error')
+      }
+    }
+  }
+
   // ── Fermer le bilan et rediriger ──
   function handleCloseBilan() {
     setAfterBilan(null)
@@ -1737,13 +1878,22 @@ function SeancePage() {
           </p>
         </div>
 
-        <button
-          onClick={handleCloseBilan}
-          className="w-full py-3.5 text-sm font-bold rounded-xl transition-colors"
-          style={{ background: 'rgba(168,85,247,0.15)', color: '#c084fc', border: '1px solid rgba(168,85,247,0.25)' }}
-        >
-          OK, compris 💪
-        </button>
+        <div className="flex gap-3">
+          <button
+            onClick={handleShareWorkout}
+            className="flex-1 py-3.5 text-sm font-bold rounded-xl transition-colors"
+            style={{ background: 'rgba(249,115,22,0.12)', color: '#f97316', border: '1px solid rgba(249,115,22,0.25)' }}
+          >
+            📸 Partager
+          </button>
+          <button
+            onClick={handleCloseBilan}
+            className="flex-1 py-3.5 text-sm font-bold rounded-xl transition-colors"
+            style={{ background: 'rgba(168,85,247,0.15)', color: '#c084fc', border: '1px solid rgba(168,85,247,0.25)' }}
+          >
+            OK, compris 💪
+          </button>
+        </div>
       </div>
     )
   }
