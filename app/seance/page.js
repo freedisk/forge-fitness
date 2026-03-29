@@ -2401,6 +2401,24 @@ function SeancePage() {
                 </div>
               )}
 
+              {/* Toggle kg/lbs */}
+              <div className="flex gap-0 mb-3" style={{ borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
+                {['kg', 'lbs'].map((u) => (
+                  <button
+                    key={u}
+                    type="button"
+                    onClick={() => setUserUnite(u)}
+                    className="flex-1 py-1.5 text-xs font-semibold transition-colors"
+                    style={{
+                      background: userUnite === u ? '#f97316' : 'transparent',
+                      color: userUnite === u ? '#fff' : '#555',
+                    }}
+                  >
+                    {u}
+                  </button>
+                ))}
+              </div>
+
               {/* En-tête colonnes */}
               <div className="flex items-center gap-2 mb-2 text-[10px] uppercase tracking-wider" style={{ color: '#555' }}>
                 <span className="w-10">Série</span>
@@ -2428,7 +2446,7 @@ function SeancePage() {
                     inputMode="decimal"
                     pattern="[0-9]*\.?[0-9]*"
                     value={serie.poids}
-                    onChange={(e) => updateManualSerieForm(i, 'poids', e.target.value.replace(/[^0-9.]/g, ''))}
+                    onChange={(e) => updateManualSerieForm(i, 'poids', e.target.value.replace(/,/g, '.').replace(/[^0-9.]/g, ''))}
                     placeholder="PDC"
                     className="flex-1 text-sm px-2 py-2 rounded-md outline-none text-center"
                     style={{ background: 'rgba(255,255,255,0.06)', color: '#f0f0f0', border: '1px solid rgba(255,255,255,0.1)', fontSize: '16px', minHeight: '44px' }}
