@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, Suspense } from 'react'
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { toKg, toDisplay, unitLabel } from '@/utils/units'
@@ -202,6 +202,7 @@ function SeancePage() {
   const [texteInput, setTexteInput] = useState('')
   const [parseResult, setParseResult] = useState(null)
   const [status, setStatus] = useState('idle') // idle | loading | parsed | saving | error
+  const isAnalyzingRef = useRef(false) // guard synchrone anti-stale closure
   const [contexte, setContexte] = useState('maison')
   const [errorMsg, setErrorMsg] = useState('')
 
@@ -1141,10 +1142,12 @@ function SeancePage() {
   }
 
   // ── Appel API parse-seance ──
+  // Guard via useRef (synchrone, immune au batching React — corrige le bug bouton inactif)
   async function handleAnalyze() {
     if (!texteInput.trim() || texteInput.trim().length < 5) return
-    if (status === 'loading') return // protection double-clic
+    if (isAnalyzingRef.current) return // guard synchrone anti-double-clic
 
+    isAnalyzingRef.current = true
     setStatus('loading')
     setErrorMsg('')
 
@@ -1168,6 +1171,8 @@ function SeancePage() {
     } catch (err) {
       setErrorMsg('Erreur réseau. Vérifie ta connexion.')
       setStatus('error')
+    } finally {
+      isAnalyzingRef.current = false
     }
   }
 
