@@ -94,7 +94,7 @@ Stockage poids TOUJOURS en kg — conversion kg/lbs uniquement à l'affichage
 - Animations CSS : slideUp (cards parsing), prPulse (badges PR), toastIn/toastOut (notifications)
 - prefers-reduced-motion respecté (désactive toutes les animations)
 - Responsive iPhone : font-size 16px (empêche zoom iOS), touch targets 44px min
-- Edge cases : confirmation séance vide, double-clic protection, validation texte ≥ 5 chars
+- Edge cases : confirmation séance vide, double-clic protection (useRef synchrone), validation texte ≥ 5 chars
 - PWA : manifest.json, favicon SVG ⚡, apple-mobile-web-app-capable
 - Toast notifications : succès (vert) / erreur (rouge), auto-dismiss 3s
 
@@ -170,6 +170,8 @@ Stockage poids TOUJOURS en kg — conversion kg/lbs uniquement à l'affichage
 - Coaching route : le logging tokens doit être fait AVANT le parsing JSON (sinon tokens perdus si JSON invalide) — corrigé Session 8
 - Filtre catalogue : les clés GROUPE_LABELS doivent matcher les valeurs DB exactes (pecs, pas pectoraux) — corrigé Session 8
 - Bouton analyse disabled : opacity-50 sur dégradé orange est insuffisant visuellement — utiliser background gris + couleur texte distincte — corrigé Session 8
+- Inputs numériques mobile : type="number" avec min empêche d'effacer le champ sur iOS — utiliser type="text" + inputMode="numeric" — corrigé Session 9
+- Bouton Analyser inactif en séance active : guard status via React state sujet au batching — utiliser useRef synchrone — corrigé Session 10
 
 ## Session 8 — Corrections & Features (2026-03-16)
 - Fix bouton Analyser multi-passes : style disabled nettement plus visible (fond gris, texte #555)
@@ -179,6 +181,13 @@ Stockage poids TOUJOURS en kg — conversion kg/lbs uniquement à l'affichage
 - Séance active : suppression exercice/cardio avec confirmation inline 3s + optimistic update
 - activeSeanceData enrichi avec exercice_id et cardio_bloc_id pour suppression DB
 - Fix logging coaching : tokens tracés avant parsing JSON (fire-and-forget)
+
+## Session 9 — Fix inputs numériques (2026-03-23)
+- Fix inputs reps/poids/séries sur /seance : type="text" + inputMode="numeric" (4 inputs)
+- Fix inputs sur /historique/[id] : 13 inputs convertis (reps, poids, séries, durée, calories, RPE)
+- Cause racine : type="number" + min={1} empêche d'effacer le champ sur mobile, parseInt()||1 force à 1 dans onChange
+- Solution : valeurs stockées comme strings, filtre regex [^0-9], parseInt uniquement à la sauvegarde
+- États initiaux manualNbSeries/manualReps convertis de number à string
 
 ## Statut
 ✅ FORGE MVP COMPLET — 10/10 étapes + Stats + Édition séance + Mode manuel + Améliorations UX
