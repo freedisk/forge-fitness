@@ -23,6 +23,7 @@ export default function ProfilPage() {
   const [exportPeriod, setExportPeriod] = useState('all')
   const [exportDateFrom, setExportDateFrom] = useState('')
   const [exportDateTo, setExportDateTo] = useState('')
+  const [exportLastN, setExportLastN] = useState('5')
   const [exporting, setExporting] = useState(false)
 
   // Champs du formulaire
@@ -334,6 +335,8 @@ export default function ProfilPage() {
         setExportDateFrom={setExportDateFrom}
         exportDateTo={exportDateTo}
         setExportDateTo={setExportDateTo}
+        exportLastN={exportLastN}
+        setExportLastN={setExportLastN}
         exporting={exporting}
         setExporting={setExporting}
         userUnite={unite}
@@ -364,18 +367,28 @@ export default function ProfilPage() {
 // ═══ Composant Export Données ═══
 
 const EXPORT_PERIODS = [
+  { value: 'last1', label: 'Dernière séance' },
+  { value: 'week', label: 'Semaine en cours' },
   { value: 'month', label: 'Mois en cours' },
   { value: '3months', label: '3 mois' },
   { value: '6months', label: '6 mois' },
   { value: 'year', label: '1 an' },
   { value: 'all', label: 'Tout' },
+  { value: 'lastN', label: 'X dernières séances' },
   { value: 'custom', label: 'Période libre' },
 ]
 
 function getExportDateRange(period, dateFrom, dateTo) {
   const now = new Date()
   let from = null
-  if (period === 'month') {
+  if (period === 'week') {
+    // Lundi de la semaine en cours
+    const day = now.getDay() // 0=dim, 1=lun…
+    const diffToMonday = (day === 0 ? -6 : 1 - day)
+    from = new Date(now)
+    from.setDate(now.getDate() + diffToMonday)
+    from.setHours(0, 0, 0, 0)
+  } else if (period === 'month') {
     from = new Date(now.getFullYear(), now.getMonth(), 1)
   } else if (period === '3months') {
     from = new Date(now)
@@ -393,17 +406,23 @@ function getExportDateRange(period, dateFrom, dateTo) {
   return { from: from?.toISOString() || null, to: to?.toISOString() || null }
 }
 
-async function fetchExportData(userId, period, dateFrom, dateTo) {
-  const { from, to } = getExportDateRange(period, dateFrom, dateTo)
-
+async function fetchExportData(userId, period, dateFrom, dateTo, lastN) {
   let query = supabase
     .from('seances')
     .select('*, series(*, exercices(nom, categorie, groupe_musculaire, type)), cardio_blocs(*)')
     .eq('user_id', userId)
     .order('date', { ascending: false })
 
-  if (from) query = query.gte('date', from.split('T')[0])
-  if (to) query = query.lte('date', to.split('T')[0])
+  if (period === 'last1') {
+    query = query.limit(1)
+  } else if (period === 'lastN') {
+    const n = Math.max(1, parseInt(lastN) || 5)
+    query = query.limit(n)
+  } else {
+    const { from, to } = getExportDateRange(period, dateFrom, dateTo)
+    if (from) query = query.gte('date', from.split('T')[0])
+    if (to) query = query.lte('date', to.split('T')[0])
+  }
 
   const { data, error } = await query
   if (error) throw new Error(error.message)
@@ -499,14 +518,14 @@ function downloadFile(content, filename, mimeType) {
   URL.revokeObjectURL(url)
 }
 
-function ExportSection({ userId, exportPeriod, setExportPeriod, exportDateFrom, setExportDateFrom, exportDateTo, setExportDateTo, exporting, setExporting }) {
+function ExportSection({ userId, exportPeriod, setExportPeriod, exportDateFrom, setExportDateFrom, exportDateTo, setExportDateTo, exportLastN, setExportLastN, exporting, setExporting }) {
   const [exportToast, setExportToast] = useState(null)
 
   async function handleExport(format) {
     if (!userId) return
     setExporting(true)
     try {
-      const seances = await fetchExportData(userId, exportPeriod, exportDateFrom, exportDateTo)
+      const seances = await fetchExportData(userId, exportPeriod, exportDateFrom, exportDateTo, exportLastN)
       if (seances.length === 0) {
         setExportToast('Aucune séance sur cette période')
         setTimeout(() => setExportToast(null), 3000)
@@ -553,6 +572,22 @@ function ExportSection({ userId, exportPeriod, setExportPeriod, exportDateFrom, 
         ))}
       </div>
 
+      {/* X dernières séances — saisie nombre */}
+      {exportPeriod === 'lastN' && (
+        <div className="mb-3">
+          <label className="text-[10px] block mb-1" style={{ color: '#555' }}>Nombre de séances</label>
+          <input
+            type="text"
+            inputMode="numeric"
+            value={exportLastN}
+            onChange={e => setExportLastN(e.target.value.replace(/[^0-9]/g, ''))}
+            placeholder="ex : 10"
+            className="w-24 text-sm px-3 py-2 rounded-lg outline-none"
+            style={{ background: 'rgba(255,255,255,0.06)', color: '#f0f0f0', border: '1px solid rgba(255,255,255,0.1)' }}
+          />
+        </div>
+      )}
+
       {/* Période libre — date pickers */}
       {exportPeriod === 'custom' && (
         <div className="flex gap-2 mb-3">
@@ -583,7 +618,7 @@ function ExportSection({ userId, exportPeriod, setExportPeriod, exportDateFrom, 
       <div className="flex gap-2">
         <button
           onClick={() => handleExport('csv')}
-          disabled={exporting || (exportPeriod === 'custom' && !exportDateFrom)}
+          disabled={exporting || (exportPeriod === 'custom' && !exportDateFrom) || (exportPeriod === 'lastN' && !exportLastN)}
           className="flex-1 py-2.5 text-sm font-semibold rounded-lg transition-colors disabled:opacity-40"
           style={{ background: 'rgba(34,197,94,0.12)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.25)' }}
         >
@@ -591,7 +626,7 @@ function ExportSection({ userId, exportPeriod, setExportPeriod, exportDateFrom, 
         </button>
         <button
           onClick={() => handleExport('json')}
-          disabled={exporting || (exportPeriod === 'custom' && !exportDateFrom)}
+          disabled={exporting || (exportPeriod === 'custom' && !exportDateFrom) || (exportPeriod === 'lastN' && !exportLastN)}
           className="flex-1 py-2.5 text-sm font-semibold rounded-lg transition-colors disabled:opacity-40"
           style={{ background: 'rgba(59,130,246,0.12)', color: '#3b82f6', border: '1px solid rgba(59,130,246,0.25)' }}
         >
