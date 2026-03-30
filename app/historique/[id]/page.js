@@ -841,6 +841,144 @@ export default function SeanceDetailPage() {
     return true
   })
 
+  // ── Partager le résumé de séance (Canvas → PNG → Web Share API) ──
+  async function handleShareWorkout() {
+    try {
+      const canvas = document.createElement('canvas')
+      const W = 1080, H = 1920
+      canvas.width = W
+      canvas.height = H
+      const ctx = canvas.getContext('2d')
+
+      // Fond dégradé sombre
+      const grad = ctx.createLinearGradient(0, 0, 0, H)
+      grad.addColorStop(0, '#0a0a0a')
+      grad.addColorStop(1, '#1a1a1a')
+      ctx.fillStyle = grad
+      ctx.fillRect(0, 0, W, H)
+
+      // Bordure orange subtile
+      ctx.strokeStyle = 'rgba(249,115,22,0.3)'
+      ctx.lineWidth = 4
+      ctx.strokeRect(40, 40, W - 80, H - 80)
+
+      // Header
+      ctx.fillStyle = '#f97316'
+      ctx.font = 'bold 72px -apple-system, BlinkMacSystemFont, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillText('⚡ FORGE', W / 2, 160)
+
+      ctx.fillStyle = '#777'
+      ctx.font = '36px -apple-system, BlinkMacSystemFont, sans-serif'
+      const dateStr = seance.date
+        ? new Date(seance.date + 'T00:00:00').toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+        : new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+      ctx.fillText(dateStr, W / 2, 230)
+
+      // Métriques
+      let y = 340
+      const metrics = []
+      if (seance.duree_totale) metrics.push({ icon: '⏱️', label: 'Durée', value: `${seance.duree_totale} min` })
+      if (seance.calories_totales) metrics.push({ icon: '🔥', label: 'Calories', value: `${seance.calories_totales} kcal` })
+      if (seance.rpe) metrics.push({ icon: '💪', label: 'RPE', value: `${seance.rpe}/10` })
+
+      const totalReps = (seance.series || []).reduce((sum, s) => sum + (s.repetitions || 0), 0)
+      if (totalReps > 0) metrics.push({ icon: '🏋️', label: 'Volume', value: `${totalReps} reps` })
+
+      if (metrics.length > 0) {
+        const mW = 220, gap = 20
+        const totalW = metrics.length * mW + (metrics.length - 1) * gap
+        let mx = (W - totalW) / 2
+
+        for (const m of metrics) {
+          ctx.fillStyle = 'rgba(249,115,22,0.08)'
+          ctx.beginPath()
+          ctx.roundRect(mx, y, mW, 130, 16)
+          ctx.fill()
+          ctx.strokeStyle = 'rgba(249,115,22,0.2)'
+          ctx.lineWidth = 1
+          ctx.stroke()
+
+          ctx.fillStyle = '#f97316'
+          ctx.font = 'bold 44px -apple-system, BlinkMacSystemFont, sans-serif'
+          ctx.textAlign = 'center'
+          ctx.fillText(m.value, mx + mW / 2, y + 60)
+          ctx.fillStyle = '#777'
+          ctx.font = '28px -apple-system, BlinkMacSystemFont, sans-serif'
+          ctx.fillText(m.label, mx + mW / 2, y + 105)
+          mx += mW + gap
+        }
+        y += 190
+      }
+
+      // Exercices groupés
+      ctx.textAlign = 'left'
+      const exGroups = groupSeriesByExercice(seance.series)
+      const cardios = [...(seance.cardio_blocs || [])].sort((a, b) => (a.ordre || 0) - (b.ordre || 0))
+
+      if (cardios.length > 0) {
+        ctx.fillStyle = '#3b82f6'
+        ctx.font = 'bold 32px -apple-system, BlinkMacSystemFont, sans-serif'
+        ctx.fillText('CARDIO', 80, y)
+        y += 50
+        for (const c of cardios) {
+          ctx.fillStyle = '#f0f0f0'
+          ctx.font = '34px -apple-system, BlinkMacSystemFont, sans-serif'
+          ctx.fillText(`🏃 ${CARDIO_LABELS[c.type_cardio] || c.type_cardio}`, 100, y)
+          ctx.fillStyle = '#777'
+          ctx.fillText(`${c.duree_minutes} min`, 700, y)
+          y += 55
+        }
+        y += 20
+      }
+
+      if (exGroups.length > 0) {
+        ctx.fillStyle = '#f97316'
+        ctx.font = 'bold 32px -apple-system, BlinkMacSystemFont, sans-serif'
+        ctx.fillText('EXERCICES', 80, y)
+        y += 50
+        for (const ex of exGroups) {
+          if (y > H - 200) break
+          const seriesStr = ex.series?.length ? `${ex.series.length}×${ex.series[0]?.repetitions || '?'}` : ''
+          const poidsStr = ex.series?.[0]?.poids_kg ? ` · ${toDisplay(ex.series[0].poids_kg, unite)}${unitLabel(unite)}` : ''
+
+          ctx.fillStyle = '#f0f0f0'
+          ctx.font = '34px -apple-system, BlinkMacSystemFont, sans-serif'
+          ctx.fillText(`💪 ${ex.nom}`, 100, y)
+          ctx.fillStyle = '#999'
+          ctx.font = '30px -apple-system, BlinkMacSystemFont, sans-serif'
+          ctx.textAlign = 'right'
+          ctx.fillText(`${seriesStr}${poidsStr}`, W - 100, y)
+          ctx.textAlign = 'left'
+          y += 55
+        }
+      }
+
+      // Footer
+      ctx.fillStyle = '#333'
+      ctx.font = '26px -apple-system, BlinkMacSystemFont, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillText('forge-fitness-one.vercel.app', W / 2, H - 80)
+
+      // Export
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'))
+      const file = new File([blob], 'forge-workout.png', { type: 'image/png' })
+
+      if (navigator.share && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: 'Ma séance FORGE' })
+      } else {
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = 'forge-workout.png'
+        a.click()
+        URL.revokeObjectURL(url)
+      }
+    } catch (err) {
+      if (err.name !== 'AbortError') console.error('❌ Share error:', err)
+    }
+  }
+
   // ═══ RENDER ═══
   return (
     <div className="min-h-screen px-4 pt-8 pb-4">
@@ -991,15 +1129,24 @@ export default function SeanceDetailPage() {
             )}
           </div>
 
-          {/* Bouton éditer (mode lecture) */}
+          {/* Boutons action (mode lecture) */}
           {!isEditing && (
-            <button
-              onClick={() => { setIsEditing(true); setNotesEdit(seance.notes || '') }}
-              className="text-xs px-3 py-2 rounded-lg font-medium"
-              style={{ color: '#f97316', border: '1px solid rgba(249,115,22,0.3)' }}
-            >
-              ✏️ Modifier
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={handleShareWorkout}
+                className="text-xs px-3 py-2 rounded-lg font-medium"
+                style={{ color: '#f97316', border: '1px solid rgba(249,115,22,0.3)' }}
+              >
+                📸
+              </button>
+              <button
+                onClick={() => { setIsEditing(true); setNotesEdit(seance.notes || '') }}
+                className="text-xs px-3 py-2 rounded-lg font-medium"
+                style={{ color: '#f97316', border: '1px solid rgba(249,115,22,0.3)' }}
+              >
+                ✏️ Modifier
+              </button>
+            </div>
           )}
         </div>
       </div>
