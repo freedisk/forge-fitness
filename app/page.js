@@ -454,7 +454,7 @@ export default function HomePage() {
           Activité 12 semaines
         </p>
 
-        <div style={{ overflowX: 'auto' }}>
+        <div style={{ overflowX: 'auto', overflowY: 'hidden' }}>
           <div style={{ display: 'flex', gap: 3 }}>
             {/* Labels jours */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 3, paddingRight: 4 }}>
