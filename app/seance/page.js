@@ -597,16 +597,21 @@ function SeancePage() {
   }
 
   // Charger les dernières performances en batch (pour tous les exercices du template)
-  async function getLastPerformanceBatch(exerciceIds) {
+  async function getLastPerformanceBatch(exerciceIds, excludeSeanceId = null) {
     if (exerciceIds.length === 0) return {}
 
     try {
-      const { data } = await supabase
+      let query = supabase
         .from('series')
-        .select('exercice_id, num_serie, repetitions, poids_kg, seances!inner(date, user_id)')
+        .select('exercice_id, num_serie, repetitions, poids_kg, seances!inner(id, date, user_id)')
         .in('exercice_id', exerciceIds)
         .eq('seances.user_id', userId)
         .order('seances(date)', { ascending: false })
+
+      // Exclure la séance en cours pour ne comparer qu'avec les sessions précédentes
+      if (excludeSeanceId) query = query.neq('seances.id', excludeSeanceId)
+
+      const { data } = await query
 
       if (!data) return {}
 
@@ -697,7 +702,8 @@ function SeancePage() {
     // Ne charger que les IDs pas encore en cache
     const newIds = exerciceIds.filter(id => !activeLastPerfs[id])
     if (newIds.length === 0) return
-    const perfs = await getLastPerformanceBatch(newIds)
+    // Exclure la séance courante — sinon les séries déjà sauvegardées font toujours "identique"
+    const perfs = await getLastPerformanceBatch(newIds, activeSeanceId)
     setActiveLastPerfs(prev => ({ ...prev, ...perfs }))
   }
 
